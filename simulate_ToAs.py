@@ -7,6 +7,7 @@ import argparse
 import sys
 import os
 import subprocess
+import shutil
 import bisect
 # import matplotlib
 # matplotlib.use("Agg")
@@ -151,9 +152,9 @@ for i, parfile in enumerate(args.parfile):
                                  "-ha", str(maxabs_ha), "-randha", randha, "-start", str(mjd_start), "-end", str(mjd_end),
                                  "-rms", str(1e-3*rms_sub), "-tel", telescope, "-idum", str(args.randnum),
                                  "-freq", str(UHF_Band.subfreq[i]), "-bw", str(UHF_Band.subbw), "-withpn", "-setref"])
-            target = os.path.join(args.dir, "{}_UHF_{}.tim".format(par, i + 1))
-            os.rename("{}.simulate".format(par), target)
-            timlines.append("INCLUDE {} \n".format(target))
+            target = os.path.join(args.dir, f"{par}_UHF_{i+1}.tim")
+            os.rename(f"{par}.simulate", target)
+            timlines.append(f"INCLUDE {target} \n")
 
     if L_Band.num_tel != 0:
         rms_l = L_Band.calculate_rms()
@@ -168,9 +169,9 @@ for i, parfile in enumerate(args.parfile):
                                  "-ha", str(maxabs_ha), "-randha", randha, "-start", str(mjd_start), "-end", str(mjd_end),
                                  "-rms", str(1e-3*rms_sub), "-tel", telescope, "-idum", str(args.randnum),
                                  "-freq", str(L_Band.subfreq[i]), "-bw", str(L_Band.subbw), "-withpn", "-setref"])
-            target = os.path.join(args.dir, "{}_L_{}.tim".format(par, i+1))
-            os.rename("{}.simulate".format(par), target)
-            timlines.append("INCLUDE {} \n".format(target))
+            target = os.path.join(args.dir, f"{par}_L_{i+1}.tim")
+            os.rename(f"{par}.simulate", target)
+            timlines.append(f"INCLUDE {target} \n")
 
     if S_Band.num_tel != 0:
         rms_s = S_Band.calculate_rms()
@@ -185,15 +186,15 @@ for i, parfile in enumerate(args.parfile):
                                  "-ha", str(maxabs_ha), "-randha", randha, "-start", str(mjd_start), "-end", str(mjd_end),
                                  "-rms", str(1e-3*rms_sub), "-tel", telescope, "-idum", str(args.randnum),
                                  "-freq", str(S_Band.subfreq[i]), "-bw", str(S_Band.subbw), "-withpn", "-setref"])
-            target = os.path.join(args.dir, "{}_S_{}.tim".format(par, i+1))
-            os.rename("{}.simulate".format(par), target)
-            timlines.append("INCLUDE {} \n".format(target))
+            target = os.path.join(args.dir, f"{par}_S_{i+1}.tim")
+            os.rename(f"{par}.simulate", target)
+            timlines.append(f"INCLUDE {target} \n")
 
-    with open("{}.tim".format(par), "w") as newf:
+    with open(f"{par}.tim", "w") as newf:
         newf.writelines(timlines)
         newf.close()
 
-    psr = lt.tempopulsar(parfile=parfile, timfile="{}.tim".format(par))
+    psr = lt.tempopulsar(parfile=parfile, timfile=f"{par}.tim")
     ltt.make_ideal(psr)
     describe = ""
 
@@ -206,11 +207,11 @@ for i, parfile in enumerate(args.parfile):
         # Convert the enterprise DM amplitude to the libstempo DM amplitude
         describe += "_DM%A{}#G{}".format(int(np.log10(args.dmnamp)), int(args.dmngamma))
 
-    psr.savetim("{}_injected.tim".format(par))
-    lt.purgetim("{}_injected.tim".format(par))
+    psr.savetim(f"{par}_injected.tim")
+    lt.purgetim(f"{par}_injected.tim")
     # Delete all lines with reference
-    lines = filter(lambda l: 'reference' not in l, open("{}_injected.tim".format(par)).readlines())
-    open("{}{}.tim".format(par, describe), 'w').writelines(lines)
+    lines = filter(lambda l: 'reference' not in l, open(f"{par}_injected.tim").readlines())
+    open(f"{par}{describe}.tim", 'w').writelines(lines)
     psrobject.append(psr)
 
 if args.gwb:
@@ -222,9 +223,15 @@ if args.gwb:
     for i, psr in enumerate(psrobject):
         par = parlist[i]
         psrn = psrnlist[i]
-        psr.savetim("{}{}.tim".format(par, gwbdescribe))
-        lt.purgetim("{}{}.tim".format(par, gwbdescribe))
-        lines = filter(lambda l: 'reference' not in l, open("{}{}.tim".format(par, gwbdescribe)))
-        open("{}{}.tim".format(par, gwbdescribe), 'w').writelines(lines)
-
-# os.rename("{}.simulate".format(par), target)
+        psr.savetim(f"{par}{gwbdescribe}.tim")
+        lt.purgetim(f"{par}{gwbdescribe}.tim")
+        lines = filter(lambda l: 'reference' not in l, open(f"{par}{gwbdescribe}.tim"))
+        open(f"{par}{gwbdescribe}.tim", 'w').writelines(lines)
+        if not os.path.exists(f"gwb_test/{psrn}/"):
+            os.makedirs(f"gwb_test/{psrn}/")
+        shutil.copy(args.parfile[i], f"gwb_test/{psrn}/")
+        shutil.copy(f"{par}{gwbdescribe}.tim", f"gwb_test/{psrn}/{psrn}_all.tim")
+        shutil.copy(f"gwb_test/{psrn}/{psrn}_all.tim", f"gwb_test/{psrn}/{par}{gwbdescribe}.tim")
+        os.remove(f"{par}{gwbdescribe}.tim")
+        os.rename(f"{psrn}.tim", f"gwb_test/{psrn}/{psrn}.tim")
+        os.rename(f"{psrn}_injected.tim", f"gwb_test/{psrn}/{psrn}_injected.tim")
