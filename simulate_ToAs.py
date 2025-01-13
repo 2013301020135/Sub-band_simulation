@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""ToA simulate wrapper for generating simulated ToAs with tempo2 fake plugin.
+"""ToA simulate wrapper for generating simulated ToAs with tempo2 fake plugin and injecting RN, DM, GWB with libstempo.
     Written by Yang Liu (liuyang@shao.ac.cn)."""
 
 import time

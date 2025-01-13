@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-"""ToA simulate wrapper for generating simulated ToAs with tempo2 fake plugin.
-    Written by Yang Liu (liuyang@shao.ac.cn)."""
+"""ToA simulate wrapper for generating simulated ToAs and injecting RN, DM, GWB with libstempo.
+    Written by Yang Liu (liuyang@shao.ac.cn).
+    Old script, not used!!!"""
 
 import time
 import argparse
@@ -84,8 +85,6 @@ if args.rha:
 else:
     randha = "n"
 
-# To do: J / B pulsars
-
 class Band:
     def __init__(self, freq, bw):
         self.freq = freq
@@ -126,21 +125,11 @@ S_Band.sub_band(args.nsbs)
 if UHF_Band.num_tel != 0:
     rms_uhf = UHF_Band.calculate_rms()
     for i, rms_sub in enumerate(rms_uhf):
-        if args.randnum is None:
-            subprocess.call(["tempo2", "-gr", "fake", "-f", args.parfile, "-ndobs", str(obs_cad), "-nobsd", str(no_obs),
-                             "-ha", str(maxabs_ha), "-randha", randha, "-start", str(mjd_start), "-end", str(mjd_end),
-                             "-rms", str(1e-3*rms_sub), "-tel", telescope, "-freq", str(UHF_Band.subfreq[i]),
-                             "-bw", str(UHF_Band.subbw), "-withpn", "-setref"])
-        else:
-            subprocess.call(["tempo2", "-gr", "fake", "-f", args.parfile, "-ndobs", str(obs_cad), "-nobsd", str(no_obs),
-                             "-ha", str(maxabs_ha), "-randha", randha, "-start", str(mjd_start), "-end", str(mjd_end),
-                             "-rms", str(1e-3*rms_sub), "-tel", telescope, "-idum", str(args.randnum),
-                             "-freq", str(UHF_Band.subfreq[i]), "-bw", str(UHF_Band.subbw), "-withpn", "-setref"])
         # os.rename("{}.simulate".format(par), target)
         # subprocess.call(["tempo2", "-gr", "fake", "-nobsd", str(no_obs), "-ha", str(maxabs_ha), "-randha", randha, "-bw", str(UHF_Band.subbw)])
         psr = lt.tempopulsar(parfile=args.parfile, timfile="{}.simulate".format(par))
-        # psr = ltt.fakepulsar(parfile=args.parfile, obstimes=np.arange(mjd_start, mjd_end, obs_cad),
-        #                     toaerr=str(rms_sub), freq=UHF_Band.subfreq[i], observatory=telescope, flags='')
+        psr = ltt.fakepulsar(parfile=args.parfile, obstimes=np.arange(mjd_start, mjd_end, obs_cad), toaerr=str(rms_sub),
+                             freq=UHF_Band.subfreq[i], observatory=telescope, flags="{}".format(telescope))
         ltt.make_ideal(psr)
         if args.rn:
             ltt.add_rednoise(psr, args.rnamp, args.rngamma, components=args.rnc, tspan=args.rntspan, seed=args.randnum)
@@ -157,19 +146,9 @@ if UHF_Band.num_tel != 0:
 if L_Band.num_tel != 0:
     rms_l = L_Band.calculate_rms()
     for i, rms_sub in enumerate(rms_l):
-        if args.randnum is None:
-            subprocess.call(["tempo2", "-gr", "fake", "-f", args.parfile, "-ndobs", str(obs_cad), "-nobsd", str(no_obs),
-                             "-ha", str(maxabs_ha), "-randha", randha, "-start", str(mjd_start), "-end", str(mjd_end),
-                             "-rms", str(1e-3*rms_sub), "-tel", telescope, "-freq", str(L_Band.subfreq[i]),
-                             "-bw", str(L_Band.subbw), "-withpn", "-setref"])
-        else:
-            subprocess.call(["tempo2", "-gr", "fake", "-f", args.parfile, "-ndobs", str(obs_cad), "-nobsd", str(no_obs),
-                             "-ha", str(maxabs_ha), "-randha", randha, "-start", str(mjd_start), "-end", str(mjd_end),
-                             "-rms", str(1e-3*rms_sub), "-tel", telescope, "-idum", str(args.randnum),
-                             "-freq", str(L_Band.subfreq[i]), "-bw", str(L_Band.subbw), "-withpn", "-setref"])
         psr = lt.tempopulsar(parfile=args.parfile, timfile="{}.simulate".format(par))
-        # psr = ltt.fakepulsar(parfile=args.parfile, obstimes=np.arange(mjd_start, mjd_end, obs_cad),
-        #                     toaerr=str(rms_sub), freq=L_Band.subfreq[i], observatory=telescope, flags='')
+        psr = ltt.fakepulsar(parfile=args.parfile, obstimes=np.arange(mjd_start, mjd_end, obs_cad), toaerr=str(rms_sub),
+                             freq=L_Band.subfreq[i], observatory=telescope, flags="{}".format(telescope))
         ltt.make_ideal(psr)
         if args.rn:
             ltt.add_rednoise(psr, args.rnamp, args.rngamma, components=args.rnc, tspan=args.rntspan, seed=args.randnum)
@@ -186,19 +165,9 @@ if L_Band.num_tel != 0:
 if S_Band.num_tel != 0:
     rms_s = S_Band.calculate_rms()
     for i, rms_sub in enumerate(rms_s):
-        if args.randnum is None:
-            subprocess.call(["tempo2", "-gr", "fake", "-f", args.parfile, "-ndobs", str(obs_cad), "-nobsd", str(no_obs),
-                             "-ha", str(maxabs_ha), "-randha", randha, "-start", str(mjd_start), "-end", str(mjd_end),
-                             "-rms", str(1e-3*rms_sub), "-tel", telescope, "-freq", str(S_Band.subfreq[i]),
-                             "-bw", str(S_Band.subbw), "-withpn", "-setref"])
-        else:
-            subprocess.call(["tempo2", "-gr", "fake", "-f", args.parfile, "-ndobs", str(obs_cad), "-nobsd", str(no_obs),
-                             "-ha", str(maxabs_ha), "-randha", randha, "-start", str(mjd_start), "-end", str(mjd_end),
-                             "-rms", str(1e-3*rms_sub), "-tel", telescope, "-idum", str(args.randnum),
-                             "-freq", str(S_Band.subfreq[i]), "-bw", str(S_Band.subbw), "-withpn", "-setref"])
         psr = lt.tempopulsar(parfile=args.parfile, timfile="{}.simulate".format(par))
-        # psr = ltt.fakepulsar(parfile=args.parfile, obstimes=np.arange(mjd_start, mjd_end, obs_cad),
-        #                     toaerr=str(rms_sub), freq=S_Band.subfreq[i], observatory=telescope, flags='')
+        psr = ltt.fakepulsar(parfile=args.parfile, obstimes=np.arange(mjd_start, mjd_end, obs_cad), toaerr=str(rms_sub),
+                             freq=S_Band.subfreq[i], observatory=telescope, flags="{}".format(telescope))
         ltt.make_ideal(psr)
         if args.rn:
             ltt.add_rednoise(psr, args.rnamp, args.rngamma, components=args.rnc, tspan=args.rntspan, seed=args.randnum)
