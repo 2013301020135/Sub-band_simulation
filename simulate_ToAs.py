@@ -224,7 +224,7 @@ if args.gwb:
         psrn = psrnlist[i]
         psr.savetim("{}{}.tim".format(par, gwbdescribe))
         lt.purgetim("{}{}.tim".format(par, gwbdescribe))
-        lines = filter(lambda l: 'reference' not in l, open("{}{}.tim".format(par, gwbdescribe))
+        lines = filter(lambda l: 'reference' not in l, open("{}{}.tim".format(par, gwbdescribe)))
         open("{}{}.tim".format(par, gwbdescribe), 'w').writelines(lines)
 
 # os.rename("{}.simulate".format(par), target)
