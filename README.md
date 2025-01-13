@@ -1,6 +1,7 @@
 # Sub-band_simulation
 Simulate ToAs in different sub-bands and inject RN, DM, GWB, etc.
 
+
 ## simulate_ToAs.py
 usage: simulate_ToAs.py [-h] -p PARFILE [PARFILE ...] [--cad CAD] [--nobs NOBS] [--maxha MAXHA]
                         [--rha] [--mjds MJDS] [--mjde MJDE] [--nuhfb NUHFB] [--nlb NLB] [--nsb NSB]
@@ -16,6 +17,11 @@ usage: simulate_ToAs.py [-h] -p PARFILE [PARFILE ...] [--cad CAD] [--nobs NOBS] 
 
 ToA simulate wrapper for generating simulated ToAs with tempo2 fake plugin. Red noise, DM noise,
 GWB are added with libstempo. Written by Yang Liu (liuyang@shao.ac.cn).
+
+
+## Example:
+  python ../Sub-band_simulation/simulate_ToAs.py -p J0023+0923.par J0030+0451.par --cad 15 --nobs 2 --maxha 6 --mjds 54000 --mjde 59000 --nuhfb 21 --nlb 22 --nsb 21 --nsbuhf 2 --nsbl 2 --nsbs 2 --narray 64 --refsig 0.01 --reffreq 1300 --refflux 1 --rnc 100 --rnamp 1e-14 --rngamma 4 --dmnc 100 --dmnamp 1e-11 --dmngamma 2 --gwb --gwbamp 1e-14 --gwbgam 4 --tel meerkat
+
 
 ## optional arguments:
   -h, --help            show this help message and exit
