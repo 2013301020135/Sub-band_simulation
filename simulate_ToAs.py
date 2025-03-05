@@ -148,10 +148,13 @@ for i, parfile in enumerate(par_files):
 
     if args.rn:
         ltt.add_rednoise(psr, args.rnamp, args.rngamma, components=args.rnc, tspan=args.rntspan, seed=args.randnum)
-        describe += "_RN%A{}+#{}".format(int(np.log10(args.rnamp)), int(args.rngamma))
+        describe += "_RN%A{}#G{}".format(int(np.log10(args.rnamp)), int(args.rngamma))
     if args.dmn:
-        ltt.add_dm(psr, args.dmnamp*np.sqrt(12)*np.pi, args.dmngamma, components=args.dmnc, seed=args.randnum)
+        ltt.add_dm(psr, args.dmnamp, args.dmngamma, components=args.dmnc, seed=args.randnum)
+        ltt.add_dm(psr, args.dmnamp*1400*1400*2.41e-4, args.dmngamma, components=args.dmnc, seed=args.randnum)
         # Convert the enterprise DM amplitude to the libstempo DM amplitude
+        # ltt.add_dm(psr, args.dmnamp*np.sqrt(12)*np.pi, args.dmngamma, components=args.dmnc, seed=args.randnum)
+        # Convert the run_enterprise DM amplitude to the libstempo DM amplitude
         describe += "_DM%A{}#G{}".format(int(np.log10(args.dmnamp)), int(args.dmngamma))
 
     psr.savetim(f"{dirpar}_injected.tim")
