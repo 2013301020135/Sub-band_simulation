@@ -37,7 +37,8 @@ parser.add_argument('--randnum', '--random-number-seed', type=int, default=None,
 parser.add_argument('--tel', type=str, default="meerkat", help='The name of the telescope')
 parser.add_argument('--refsig', '--reference-sigma', type=float, default=1, help='The rms of Gaussian noise in micro-second when all telescope are in reference frequency')
 parser.add_argument('--reffreq', '--reference-frequency', type=float, default=1300, help='The reference frequency in MHz')
-parser.add_argument('--refflux', '--reference-flux', type=float, default=1, help='The reference flux in micro-Jy at reference frequency')
+parser.add_argument('--refflux', '--reference-flux', type=float, default=1, help='The reference flux in micro-Jy at reference frequency') # Add coefficient
+parser.add_argument('--refgamma', '--reference-gamma', type=float, default=1.6, help='The reference spectral index')
 parser.add_argument('--rn', '--red-noise', action='store_true', help='Inject red noise if called')
 parser.add_argument('--rnamp', '--red-noise-amplitude', type=float, default=1e-12, help='The red noise amplitude')
 parser.add_argument('--rngamma', '--red-noise-gamma', type=float, default=3, help='The red noise spectral slope (gamma, positive)')
@@ -75,7 +76,7 @@ class Band:
         self.rms = None
 
     def calculate_rms(self, gamma_p=1.6):
-        rms = args.refsig/self.ratio_tel*self.num_sub * (self.subfreq/args.reffreq)**gamma_p
+        rms = args.refsig/self.ratio_tel*np.sqrt(self.num_sub) * (self.subfreq/args.reffreq)**gamma_p
         self.rms = rms
         return self.rms
 
@@ -111,7 +112,7 @@ for i, parfile in enumerate(par_files):
 
     if args.nuhfb != 0:
         UHF_Band = Band(args.cfrequhf, args.bwuhf, args.nuhfb, args.nsbuhf)
-        rms_uhf = UHF_Band.calculate_rms()
+        rms_uhf = UHF_Band.calculate_rms(gamma_p=args.refgamma)
         for j, rms_sub in enumerate(rms_uhf):
             tempo2_fake_simulate(parfile, args.cad, args.nobs, args.maxha, randha, args.mjds, args.mjde, rms_sub,
                                  args.tel, UHF_Band.subfreq[j], UHF_Band.subbw, args.randnum)
@@ -121,7 +122,7 @@ for i, parfile in enumerate(par_files):
 
     if args.nlb != 0:
         L_Band = Band(args.cfreql, args.bwl, args.nlb, args.nsbl)
-        rms_l = L_Band.calculate_rms()
+        rms_l = L_Band.calculate_rms(gamma_p=args.refgamma)
         for j, rms_sub in enumerate(rms_l):
             tempo2_fake_simulate(parfile, args.cad, args.nobs, args.maxha, randha, args.mjds, args.mjde, rms_sub,
                                  args.tel, L_Band.subfreq[j], L_Band.subbw, args.randnum)
@@ -131,7 +132,7 @@ for i, parfile in enumerate(par_files):
 
     if args.nsb != 0:
         S_Band = Band(args.cfreqs, args.bws, args.nsb, args.nsbs)
-        rms_s = S_Band.calculate_rms()
+        rms_s = S_Band.calculate_rms(gamma_p=args.refgamma)
         for j, rms_sub in enumerate(rms_s):
             tempo2_fake_simulate(parfile, args.cad, args.nobs, args.maxha, randha, args.mjds, args.mjde, rms_sub,
                                  args.tel, S_Band.subfreq[j], S_Band.subbw, args.randnum)
@@ -150,7 +151,7 @@ for i, parfile in enumerate(par_files):
         ltt.add_rednoise(psr, args.rnamp, args.rngamma, components=args.rnc, tspan=args.rntspan, seed=args.randnum)
         describe += "_RN%A{}#G{}".format(int(np.log10(args.rnamp)), int(args.rngamma))
     if args.dmn:
-        ltt.add_dm(psr, args.dmnamp, args.dmngamma, components=args.dmnc, seed=args.randnum)
+        # ltt.add_dm(psr, args.dmnamp, args.dmngamma, components=args.dmnc, seed=args.randnum)
         ltt.add_dm(psr, args.dmnamp*1400*1400*2.41e-4, args.dmngamma, components=args.dmnc, seed=args.randnum)
         # Convert the enterprise DM amplitude to the libstempo DM amplitude
         # ltt.add_dm(psr, args.dmnamp*np.sqrt(12)*np.pi, args.dmngamma, components=args.dmnc, seed=args.randnum)
@@ -190,3 +191,10 @@ if args.gwb:
 
 if not os.path.exists(datadir+"chains/"):
     os.makedirs(datadir+"chains/")
+
+for name in parlist:
+    with open(f"{datadir}/chains/{name}.json", 'w') as file:
+        file.writelines('{ \n')
+        file.writelines(f'    "{name}_efac": 1,\n')
+        file.writelines(f'    "{name}_log10_tnequad": -10\n')
+        file.writelines('}')
