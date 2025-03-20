@@ -193,7 +193,7 @@ if not os.path.exists(datadir+"chains/"):
     os.makedirs(datadir+"chains/")
 
 for name in parlist:
-    with open(f"{datadir}/chains/{name}.json", 'w') as file:
+    with open(f"{datadir}/chains/noisefiles/{name}.json", 'w') as file:
         file.writelines('{ \n')
         file.writelines(f'    "{name}_efac": 1,\n')
         file.writelines(f'    "{name}_log10_tnequad": -10\n')
