@@ -61,7 +61,13 @@ parser.add_argument('--gwbnpts', '--gwb-npts', type=int, default=600, help='The 
 parser.add_argument('--gwbhowml', '--gwb-howml', type=float, default=10, help='The lowest frequency is 1/(howml * T)')
 parser.add_argument('--timd', '--tim-dir', type=str, default='tims/', help='The relative path to the directory for output simulation tim files')
 parser.add_argument('--resd', '--result-dir', type=str, default='results/', help='The relative path to the directory for results')
+parser.add_argument('--chaind', '--chains-dir', type=str, default='chains/', help='The relative path to the directory for chains')
+parser.add_argument('--noised', '--noises-dir', type=str, default='noisefiles/', help='The relative path to the directory for noisefiles')
+parser.add_argument('--testd', '--test-dir', type=str, default=None, help='The directory for saving all files in a serie test of a specific parameters')
+parser.add_argument('--comtd', '--comment-dir', type=str, default=None, help='The subdirectory for saving all files in a serie test')
+parser.add_argument('--reald', '--realization-dir', type=str, default=None, help='The directory for saving all files in one run')
 # /cluster/home/liuyang/Sub-Array
+
 
 class Band:
     def __init__(self, freq, bw, num_tel, num_sub):
@@ -80,6 +86,7 @@ class Band:
         self.rms = rms
         return self.rms
 
+
 def tempo2_fake_simulate(parfile, obs_cad, no_obs, maxabs_ha, randha, mjd_start, mjd_end, rms_sub, telescope,
                          subfreq, subbw, randnum=None):
     command = ["tempo2", "-gr", "fake", "-f", parfile, "-ndobs", str(obs_cad), "-nobsd", str(no_obs), "-ha",
@@ -88,6 +95,64 @@ def tempo2_fake_simulate(parfile, obs_cad, no_obs, maxabs_ha, randha, mjd_start,
     if randnum is not None:
         command.extend(["-idum", str(randnum)])
     subprocess.run(command, check=True)
+
+
+def describe_name(rnamp, rngamma, dmnamp, dmngamma, gwbamp, gwbgam, rn=False, dmn=False, gwb=False):
+    desc = ""
+    if rn:
+        desc += f"_RN%A{int(np.log10(rnamp))}#G{int(rngamma)}"
+    if dmn:
+        desc += f"_DM%A{int(np.log10(dmnamp))}#G{int(dmngamma)}"
+    if gwb:
+        desc += f"_GWB%A{int(np.log10(gwbamp))}#G{int(gwbgam)}"
+    return desc
+
+
+def save_paras(arg, exd, plist):
+    with open(f"{arg.datadir+exd}paras_info.txt", "w") as paraf:
+        paraf.writelines("Parameter information:\n")
+        paraf.writelines(f"Relative path to the directory containing the par files: {arg.datadir}\n")
+        paraf.writelines(f"{len(plist)} pulsars are used in simulation: \n")
+        paraf.writelines(f"{psrn}, " for psrn in plist)
+        paraf.writelines("\n")
+        paraf.writelines(f"Directory for output simulation tim files: {arg.timd}\n")
+        paraf.writelines(f"Directory for result par and tim files: {arg.resd}\n")
+        paraf.writelines(f"Directory for MCMC chains: {arg.chaind}\n")
+        paraf.writelines(f"Directory for noise files: {arg.noised}\n")
+        paraf.writelines(f"Directory for test of a specific parameters: {arg.testd}/\n")
+        paraf.writelines(f"Directory for a test series: {arg.comtd}/\n")
+        paraf.writelines(f"Directory for a realization of given value: {arg.reald}/\n")
+        paraf.writelines(f"MJD range: {arg.mjds} - {arg.mjde}\n")
+        paraf.writelines(f"Observation cadence: {arg.cad} days, {arg.nobs} observations each time\n")
+        paraf.writelines(f"Telescope: {arg.tel}, {arg.narray} arrays in total\n")
+        paraf.writelines(f"UHF Band: central frequncy - {arg.cfrequhf} MHz, bandwidth - {arg.bwuhf} MHz, "
+                         f"{arg.nuhfb} arrays, {arg.nsbuhf} sub-bands\n")
+        paraf.writelines(f"L Band: central frequncy - {arg.cfreql} MHz, bandwidth - {arg.bwl} MHz, "
+                         f"{arg.nlb} arrays, {arg.nsbl} sub-bands\n")
+        paraf.writelines(f"S Band: central frequncy - {arg.cfreqs} MHz, bandwidth - {arg.bws} MHz, "
+                         f"{arg.nsb} arrays, {arg.nsbs} sub-bands\n")
+        paraf.writelines(f"Reference: frequency - {arg.reffreq} MHz, sigma - {arg.refsig} μs, "
+                         f"flux - {arg.refflux} μJy, spectral index - {arg.refgamma}\n")
+        paraf.writelines(f"Maximum absolute hour angle allowed: {arg.maxha}, ")
+        paraf.writelines("random hour angle\n" if arg.rha else "regular hour angle\n")
+        paraf.writelines(f"Random number seed: {arg.randnum}\n" if arg.randnum is not None else "")
+        if arg.rn:
+            paraf.writelines(f"Red Noise injection: amplitude - {arg.rnamp}, gamma - {arg.rngamma}, "
+                             f"components - {arg.rnc}, time span - {arg.nsbuhf}\n")
+        if arg.dmn:
+            paraf.writelines(f"Dispersion Measure Noise injection: amplitude - {arg.dmnamp}, gamma - {arg.dmngamma}, "
+                             f"components - {arg.dmnc}\n")
+        if arg.gwb:
+            paraf.writelines(f"Gravitational Wave Background injection: amplitude - {arg.gwbamp}, "
+                             f"gamma - {arg.gwbgam}, number of points used in interpolation - {arg.gwbnpts}\n")
+            paraf.writelines(f"Maximum multipole of GW power decomposition - {arg.lmax}, "
+                             f"lowest frequency 1/(howml * T) - {arg.gwbhowml}, "
+                             f"Add red noise with no correlation\n" if arg.nocorr else "\n")
+            if arg.turnover:
+                paraf.writelines(f"Produce spectrum with turnover at frequency f0 - {arg.gwbf0} Hz, "
+                                 f"Spectral index of power spectrum for f<<f0 - {arg.gwbbeta}, "
+                                 f"Fudge factor for flatness of spectrum turnover - {arg.gwbpower}\n")
+
 
 args = parser.parse_args()
 if args.rha:
@@ -101,13 +166,30 @@ else:
     par_files = args.parfile
     datadir = ""
 
-parlist = [parfile.split(".", 1)[0].split("/")[-1] for parfile in par_files]
+parlist = [parfile.split("/")[-1].split(".", 1)[0] for parfile in par_files]
 
-if not os.path.exists(datadir+args.timd):
-    os.makedirs(datadir+args.timd)
+extradir = ""
+if args.testd is not None:
+    if not os.path.exists(datadir + extradir + args.testd):
+        os.makedirs(datadir + extradir + args.testd)
+    extradir = extradir + args.testd + "/"
+if args.comtd is not None:
+    if not os.path.exists(datadir + extradir + args.comtd):
+        os.makedirs(datadir + extradir + args.comtd)
+    extradir = extradir + args.comtd + "/"
+if args.reald is not None:
+    if not os.path.exists(datadir + extradir + args.reald):
+        os.makedirs(datadir + extradir + args.reald)
+    extradir = extradir + args.reald + "/"
+if not os.path.exists(datadir + extradir + args.timd):
+    os.makedirs(datadir + extradir + args.timd)
+
+describe = describe_name(args.rnamp, args.rngamma, args.dmnamp, args.dmngamma, args.gwbamp, args.gwbgam,
+                         rn=args.rn, dmn=args.dmn, gwb=args.gwb)
+save_paras(args, extradir, parlist)
 
 for i, parfile in enumerate(par_files):
-    dirpar = parfile.split(".", 1)[0]
+    psrn = parfile.split("/")[-1].split(".", 1)[0]
     timlines = ["FORMAT 1 \n"]
 
     if args.nuhfb != 0:
@@ -116,8 +198,8 @@ for i, parfile in enumerate(par_files):
         for j, rms_sub in enumerate(rms_uhf):
             tempo2_fake_simulate(parfile, args.cad, args.nobs, args.maxha, randha, args.mjds, args.mjde, rms_sub,
                                  args.tel, UHF_Band.subfreq[j], UHF_Band.subbw, args.randnum)
-            target = os.path.join(args.timd, f"{parlist[i]}_UHF_{j+1}.tim")
-            os.rename(datadir+f"{parlist[i]}.simulate", datadir+target)
+            target = f"{parlist[i]}_UHF_{j+1}.tim"
+            os.rename(datadir+f"{parlist[i]}.simulate", datadir+extradir+args.timd+target)
             timlines.append(f"INCLUDE {target} \n")
 
     if args.nlb != 0:
@@ -126,8 +208,8 @@ for i, parfile in enumerate(par_files):
         for j, rms_sub in enumerate(rms_l):
             tempo2_fake_simulate(parfile, args.cad, args.nobs, args.maxha, randha, args.mjds, args.mjde, rms_sub,
                                  args.tel, L_Band.subfreq[j], L_Band.subbw, args.randnum)
-            target = os.path.join(args.timd, f"{parlist[i]}_L_{j+1}.tim")
-            os.rename(datadir+f"{parlist[i]}.simulate", datadir+target)
+            target = f"{parlist[i]}_L_{j + 1}.tim"
+            os.rename(datadir+f"{parlist[i]}.simulate", datadir+extradir+args.timd+target)
             timlines.append(f"INCLUDE {target} \n")
 
     if args.nsb != 0:
@@ -136,65 +218,66 @@ for i, parfile in enumerate(par_files):
         for j, rms_sub in enumerate(rms_s):
             tempo2_fake_simulate(parfile, args.cad, args.nobs, args.maxha, randha, args.mjds, args.mjde, rms_sub,
                                  args.tel, S_Band.subfreq[j], S_Band.subbw, args.randnum)
-            target = os.path.join(args.timd, f"{parlist[i]}_S_{j+1}.tim")
-            os.rename(datadir+f"{parlist[i]}.simulate", datadir+target)
+            target = f"{parlist[i]}_S_{j + 1}.tim"
+            os.rename(datadir+f"{parlist[i]}.simulate", datadir+extradir+args.timd+target)
             timlines.append(f"INCLUDE {target} \n")
 
-    with open(f"{dirpar}.tim", "w") as newf:
+    with open(f"{datadir+extradir+args.timd+psrn}.tim", "w") as newf:
         newf.writelines(timlines)
 
-    psr = lt.tempopulsar(parfile=parfile, timfile=f"{dirpar}.tim")
+    psr = lt.tempopulsar(parfile=parfile, timfile=f"{datadir+extradir+args.timd+psrn}.tim")
     ltt.make_ideal(psr)
-    describe = ""
+    rndescribe = ""
 
     if args.rn:
         ltt.add_rednoise(psr, args.rnamp, args.rngamma, components=args.rnc, tspan=args.rntspan, seed=args.randnum)
-        describe += "_RN%A{}#G{}".format(int(np.log10(args.rnamp)), int(args.rngamma))
+        rndescribe += "_RN%A{}#G{}".format(int(np.log10(args.rnamp)), int(args.rngamma))
     if args.dmn:
         # ltt.add_dm(psr, args.dmnamp, args.dmngamma, components=args.dmnc, seed=args.randnum)
         ltt.add_dm(psr, args.dmnamp*1400*1400*2.41e-4, args.dmngamma, components=args.dmnc, seed=args.randnum)
         # Convert the enterprise DM amplitude to the libstempo DM amplitude
         # ltt.add_dm(psr, args.dmnamp*np.sqrt(12)*np.pi, args.dmngamma, components=args.dmnc, seed=args.randnum)
         # Convert the run_enterprise DM amplitude to the libstempo DM amplitude
-        describe += "_DM%A{}#G{}".format(int(np.log10(args.dmnamp)), int(args.dmngamma))
+        rndescribe += "_DM%A{}#G{}".format(int(np.log10(args.dmnamp)), int(args.dmngamma))
 
-    psr.savetim(f"{dirpar}_injected.tim")
-    lt.purgetim(f"{dirpar}_injected.tim")
+    psr.savetim(f"{datadir+extradir+args.timd+psrn}_injected.tim")
+    lt.purgetim(f"{datadir+extradir+args.timd+psrn}_injected.tim")
     # Delete all lines with reference
-    lines = filter(lambda l: 'reference' not in l, open(f"{dirpar}_injected.tim").readlines())
-    with open(f"{dirpar}{describe}.tim", 'w') as file:
+    lines = filter(lambda l: 'reference' not in l, open(f"{datadir+extradir+args.timd+psrn}_injected.tim").readlines())
+    with open(f"{datadir+extradir+args.timd+psrn}{rndescribe}.tim", 'w') as file:
         file.writelines(lines)
 
 if args.gwb:
-    psrobject = [lt.tempopulsar(parfile=pf, timfile="{}_injected.tim".format(pf.split(".", 1)[0])) for pf in par_files]
+    psrobject = [lt.tempopulsar(parfile=f"{datadir+psrn}.par",
+                                timfile=f"{datadir+extradir+args.timd+psrn}_injected.tim") for pf in parlist]
     ltt.createGWB(psrobject, args.gwbamp, args.gwbgam, noCorr=args.nocorr, seed=args.randnum, lmax=args.lmax,
                   turnover=args.turnover, f0=args.gwbf0, beta=args.gwbbeta, power=args.gwbpower, npts=args.gwbnpts,
                   howml=args.gwbhowml)
     gwbdescribe = "_GWB%A{}#G{}".format(int(np.log10(args.gwbamp)), int(args.gwbgam))
-    if not os.path.exists(datadir+f"{args.resd}/"):
-        os.makedirs(datadir+f"{args.resd}/")
+    if not os.path.exists(datadir+extradir+args.resd):
+        os.makedirs(datadir+extradir+args.resd)
     for k, psr in enumerate(psrobject):
-        par = parlist[k]
-        psrn = par.split("_")[-1]
-        psr.savetim(f"{dirpar}{gwbdescribe}.tim")
-        lt.purgetim(f"{dirpar}{gwbdescribe}.tim")
-        lines = filter(lambda l: 'reference' not in l, open(f"{dirpar}{gwbdescribe}.tim").readlines())
-        open(f"{dirpar}{gwbdescribe}.tim", 'w').writelines(lines)
-        if not os.path.exists(datadir+f"{args.resd}/{psrn}/"):
-            os.makedirs(datadir+f"{args.resd}/{psrn}/")
+        psrn = parlist[k]
+        psrnpar = f"{psrn}/{psrn}"
+        if not os.path.exists(datadir+extradir+args.resd+psrn):
+            os.makedirs(datadir+extradir+args.resd+psrn)
+        psr.savetim(f"{datadir+extradir+args.resd+psrnpar}{gwbdescribe}.tim")
+        lt.purgetim(f"{datadir+extradir+args.resd+psrnpar}{gwbdescribe}.tim")
+        lines = filter(lambda l: 'reference' not in l, open(f"{datadir+extradir+args.resd+psrnpar}{gwbdescribe}.tim").readlines())
+        open(f"{datadir+extradir+args.resd+psrnpar}{gwbdescribe}.tim", 'w').writelines(lines)
         # Move par and tim files to the right directory and rename them according to enterprise standard
-        shutil.copy(par_files[k], datadir+f"{args.resd}/{psrn}/")
-        shutil.copy(f"{dirpar}{gwbdescribe}.tim", datadir+f"{args.resd}/{psrn}/{psrn}_all.tim")
-        shutil.move(f"{dirpar}{gwbdescribe}.tim", datadir+f"{args.resd}/{psrn}/{par}{gwbdescribe}.tim")
-        os.rename(datadir+f"{psrn}.tim", datadir+f"{args.resd}/{psrn}/{psrn}.tim")
-        os.rename(datadir+f"{psrn}_injected.tim", datadir+f"{args.resd}/{psrn}/{psrn}_injected.tim")
+        shutil.copy(par_files[k], datadir+extradir+args.resd+f"{psrn}/")
+        shutil.copy(datadir+extradir+args.resd+psrnpar+f"{gwbdescribe}.tim", datadir+extradir+args.resd+psrnpar+"_all.tim")
 
-if not os.path.exists(datadir+"chains/"):
-    os.makedirs(datadir+"chains/")
+if not os.path.exists(datadir+extradir+args.chaind):
+    os.makedirs(datadir+extradir+args.chaind)
 
-for name in parlist:
-    with open(f"{datadir}/chains/noisefiles/{name}.json", 'w') as file:
-        file.writelines('{ \n')
-        file.writelines(f'    "{name}_efac": 1,\n')
-        file.writelines(f'    "{name}_log10_tnequad": -10\n')
-        file.writelines('}')
+if not os.path.exists(datadir+extradir+args.noised):
+    os.makedirs(datadir+extradir+args.noised)
+
+for psrn in parlist:
+    with open(f"{datadir+extradir+args.noised+psrn}.json", 'w') as file:
+        file.writelines("{ \n")
+        file.writelines(f"    '{psrn}_efac': 1,\n")
+        file.writelines(f"    '{psrn}_log10_tnequad': -10\n")
+        file.writelines("} \n")
