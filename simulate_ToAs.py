@@ -189,7 +189,7 @@ def save_paras(arg, exd, plist):
         paraf.writelines(f"Random number seed: {arg.randnum}\n" if arg.randnum is not None else "")
         if arg.rn:
             paraf.writelines(f"Red Noise injection: amplitude - {arg.rnamp}, gamma - {arg.rngamma}, "
-                             f"components - {arg.rnc}, time span - {arg.nsbuhf}\n")
+                             f"components - {arg.rnc}, time span - {arg.rntspan}\n")
         if arg.dmn:
             paraf.writelines(f"Dispersion Measure Noise injection: amplitude - {arg.dmnamp}, gamma - {arg.dmngamma}, "
                              f"components - {arg.dmnc}\n")
@@ -298,6 +298,9 @@ for i, parfile in enumerate(par_files):
     with open(f"{datadir+extradir+args.timd+psrn}{rndescribe}.tim", 'w') as file:
         file.writelines(lines)
 
+if not os.path.exists(datadir+extradir+args.resd):
+    os.makedirs(datadir+extradir+args.resd)
+
 if args.gwb:
     psrobject = [lt.tempopulsar(parfile=f"{datadir+psrn}.par",
                                 timfile=f"{datadir+extradir+args.timd+psrn}_injected.tim")
@@ -306,8 +309,6 @@ if args.gwb:
                   turnover=args.turnover, f0=args.gwbf0, beta=args.gwbbeta, power=args.gwbpower, npts=args.gwbnpts,
                   howml=args.gwbhowml)
     gwbdescribe = "_GWB%A{}#G{}".format(int(np.log10(args.gwbamp)), int(args.gwbgam))
-    if not os.path.exists(datadir+extradir+args.resd):
-        os.makedirs(datadir+extradir+args.resd)
     for k, psr in enumerate(psrobject):
         psrn = psrnlist[k]
         if not os.path.exists(datadir+extradir+args.resd+psrn):
@@ -321,6 +322,16 @@ if args.gwb:
         shutil.copy(par_files[k], datadir+extradir+args.resd+psrn+f"/{psrn}.par")
         shutil.copy(datadir+extradir+args.resd+psrn+f"/{psrn+gwbdescribe}.tim",
                     datadir+extradir+args.resd+psrn+f"/{psrn}_all.tim")
+else:
+    for k, psrn in enumerate(psrnlist):
+        if not os.path.exists(datadir+extradir+args.resd+psrn):
+            os.makedirs(datadir+extradir+args.resd+psrn)
+        # Move par and tim files to the right directory and rename them according to enterprise standard
+        shutil.copy(par_files[k], datadir+extradir+args.resd+psrn+f"/{psrn}.par")
+        lines = filter(lambda l: 'reference' not in l,
+                       open(f"{datadir+extradir+args.timd+psrn}_injected.tim").readlines())
+        with open(f"{datadir+extradir+args.resd+psrn}/{psrn}_all.tim", 'w') as file:
+            file.writelines(lines)
 
 if not os.path.exists(datadir+extradir+args.chaind):
     os.makedirs(datadir+extradir+args.chaind)
