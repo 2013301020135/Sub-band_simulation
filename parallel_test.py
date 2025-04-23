@@ -6,10 +6,11 @@ import argparse
 import os
 # import glob
 import subprocess
-# import shutil
+import shutil
 import time
 
 import numpy as np
+import pandas as pd
 # import libstempo as lt
 # import libstempo.toasim as ltt
 import logging
@@ -140,7 +141,8 @@ parser.add_argument('--dmnnb', '--dm-noise-num-bin', type=int, default=100,
                     help='The number of bins used to fit DM noise')
 parser.add_argument('--gwbnb', '--gwb-num-bin', type=int, default=100,
                     help='The number of bins used to fit gravitational wave background')
-
+parser.add_argument('--refit', '--rerun-fitting', type=str, default=None,
+                    help='Rerun MCMC with existing simulation data in given test folder + old comment name')
 # /cluster/home/liuyang/Sub-Array
 args = parser.parse_args()
 
@@ -253,6 +255,14 @@ def make_directories(datadir, testdir, comtdir, realdir):
     return extradir
 
 
+def copy_folder(src, dst):
+    """Copy all contents in source folder to destination folder"""
+    try:
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+    except Exception as e:
+        print(f"Folder copy failed: {str(e)}")
+
+
 def generate_toa_wrapper(params):
     """An wrapper for generate_toa."""
     return generate_toa(*params)
@@ -327,10 +337,10 @@ def mcmc_fit(datadir, entdir, extradir, describe, resdir, chaindir, noisedir, nu
              rnnb=None, dmnnb=None, gwbnb=None):
     """Run MCMC fit to recover the injected signals for corresponding simulation ToAs"""
     start = time.time()
-    # "nohup", "nice", "srun", "--exclusive", "-n", str(numcore), "--ntasks-per-node=16", "--mem=64G", "--partition=q3",
-    command = ["python", entdir+"enterprise_bayesian_analysis.py", "-o", datadir+extradir+chaindir,
-               "-d", datadir+extradir+resdir, "--noisedirs", datadir+extradir+chaindir+noisedir,
-               "--maxobs", str(maxobs), "--sampler", sampler+",Niter="+str(niter)]
+    # "nohup", "nice", "srun", "-n", str(numcore), "--exclusive", "--ntasks-per-node=16", "--mem=64G", "--partition=q3",
+    command = ["python", entdir+"enterprise_bayesian_analysis.py",
+               "-o", datadir+extradir+chaindir, "-d", datadir+extradir+resdir, "--noisedirs",
+               datadir+extradir+chaindir+noisedir, "--maxobs", str(maxobs), "--sampler", sampler+",Niter="+str(niter)]
     model = "TM/WN,fix"
     if rnnb is not None:
         model += f"/RN,nb={rnnb}"
@@ -391,18 +401,41 @@ def execute_pipeline(arg):
     logging.info(f"Varying parameter: {args.vary}")
     logging.info(f"Values for varying parameter: {args.values}")
     try:
-        # Step 1: ToA simulation
-        logging.info("===Begin simulated ToA generation===")
-        toa_params = build_task_params(arg, arg.vary, arg.values)
-        logging.info(f"Successfully constructed parameters lists for {len(toa_params)} tasks")
-        # Construct parameters lists and record
-        generate_results = monitored_parallel_execute(generate_toa_wrapper, toa_params, "ToA progress")
-        # Check results
-        success_generate = [res for res in generate_results if res[0] == 0]
-        if len(success_generate) != len(toa_params):
-            lost = len(toa_params) - len(success_generate)
-            logging.error(f"Number of failed tasks in simulated ToA generation: {lost}")
-            raise RuntimeError("Exist failed tasks in simulated ToA generation!")
+        if arg.refit is None:
+            # Step 1: ToA simulation
+            logging.info("===Begin simulated ToA generation===")
+            toa_params = build_task_params(arg, arg.vary, arg.values)
+            logging.info(f"Successfully constructed parameters lists for {len(toa_params)} tasks")
+            # Construct parameters lists and record
+            generate_results = monitored_parallel_execute(generate_toa_wrapper, toa_params, "ToA progress")
+            # Check results
+            success_generate = [res for res in generate_results if res[0] == 0]
+            if len(success_generate) != len(toa_params):
+                lost = len(toa_params) - len(success_generate)
+                logging.error(f"Number of failed tasks in simulated ToA generation: {lost}")
+                raise RuntimeError("Exist failed tasks in simulated ToA generation!")
+        else:
+            logging.info("===Skip ToA generation===")
+            generate_results = []
+            toa_params = build_task_params(arg, arg.vary, arg.values)
+            for tp in toa_params:
+                desc = describe_injection(tp[27], tp[28], tp[30], tp[31], tp[33], tp[34],
+                                          rn=tp[35], dmn=tp[36], gwb=tp[37])
+                extd = make_directories(tp[0], tp[6], tp[7], tp[8])
+                if not os.path.exists(tp[0] + extd + tp[4]):
+                    os.makedirs(tp[0] + extd + tp[4])
+                copy_folder(arg.refit + desc + f"/{tp[8]}/" + tp[3], tp[0] + extd + tp[3])
+                copy_folder(arg.refit + desc + f"/{tp[8]}/" + tp[4] + tp[5], tp[0] + extd + tp[4] + tp[5])
+                shutil.copy(arg.refit + desc + f"/{tp[8]}/paras_info.txt", tp[0] + extd + "/paras_info.txt")
+                shutil.copy(arg.refit + desc + f"/{tp[8]}/simulate_command.txt", tp[0] + extd + "/simulate_command.txt")
+                shutil.copy(arg.refit + desc + f"/{tp[8]}/simulate_out.txt", tp[0] + extd + "/simulate_out.txt")
+                generate_results.append([0, extd, desc, tp[3], tp[4], tp[5]])
+            success_generate = [res for res in generate_results if res[0] == 0]
+            logging.info(f"Successfully loaded simulation ToAs for {len(toa_params)} tasks")
+            if len(success_generate) != len(toa_params):
+                lost = len(toa_params) - len(success_generate)
+                logging.error(f"Number of failed tasks in reload simulated ToA: {lost}")
+                raise RuntimeError("Exist failed tasks in reload simulated ToA!")
         # Step 2: MCMC fit
         logging.info("===Begin MCMC fitting===")
         mcmc_params = [(arg.datadir, arg.entd, extd, desc, res, cha, noi, arg.ncore, arg.maxobs, arg.samp, arg.niter,
