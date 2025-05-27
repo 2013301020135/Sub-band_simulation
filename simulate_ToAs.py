@@ -7,341 +7,407 @@ import os
 import glob
 import subprocess
 import shutil
+# import inspect
 import numpy as np
 import libstempo as lt
 import libstempo.toasim as ltt
 
-parser = argparse.ArgumentParser(description='ToA simulate wrapper.'
-                                             'Simulated ToAs are generated with tempo2 fake plugin.'
-                                             'Red noise, DM noise, GWB are added with libstempo.'
-                                             'Written by Yang Liu (liuyang@shao.ac.cn).')
-parser.add_argument('-p', '--parfile', type=str, default=[], nargs='+',
-                    help='Parameter files for pulsars used in simulation')
-parser.add_argument('-d', '--datadir', type=str, default=None, help='Path to the directory containing the par files')
-parser.add_argument('--cad', '--observation-cadence', type=float, default=14,
-                    help='The number of days between observations')
-parser.add_argument('--nobs', '--no-of-observation', type=int, default=1,
-                    help='The number of observations on a given day')
-parser.add_argument('--maxha', '--hour-angle', type=float, default=8, help='The maximum absolute hour angle allowed')
-parser.add_argument('--rha', '--random-hour-angle', action='store_true',
-                    help='Use random hour angle coverage if called, otherwise use regular hour angle')
-parser.add_argument('--mjds', '--initial-mjd', type=int, default=50000, help='The initial MJD for the simulated TOAs')
-parser.add_argument('--mjde', '--final-mjd', type=int, default=60000, help='The final MJD for the simulated TOAs')
-parser.add_argument('--nuhfb', '--num-uhfband', type=int, default=0, help='Number of arrays in UHF-Band')
-parser.add_argument('--nlb', '--num-lband', type=int, default=32, help='Number of arrays in L-Band')
-parser.add_argument('--nsb', '--num-sband', type=int, default=32, help='Number of arrays in S-Band')
-parser.add_argument('--nsbuhf', '--num-uhf-subband', type=int, default=8, help='Number of sub-bands in UHF-Band')
-parser.add_argument('--nsbl', '--num-l-subband', type=int, default=8, help='Number of sub-bands in L-Band')
-parser.add_argument('--nsbs', '--num-s-subband', type=int, default=8, help='Number of sub-bands in S-Band')
-parser.add_argument('--cfrequhf', '--central-frequency-uhf', type=float, default=810,
-                    help='Central frequency of UHF-Band in MHz')
-parser.add_argument('--cfreql', '--central-frequency-l', type=float, default=1280,
-                    help='Central frequency of L-Band in MHz')
-parser.add_argument('--cfreqs', '--central-frequency-s', type=float, default=2600,
-                    help='Central frequency of S-Band in MHz')
-parser.add_argument('--bwuhf', '--bandwidth-uhf', type=float, default=500, help='Bandwidth of UHF-Band in MHz')
-parser.add_argument('--bwl', '--bandwidth-l', type=float, default=800, help='Bandwidth of L-Band in MHz')
-parser.add_argument('--bws', '--bandwidth-s', type=float, default=800, help='Bandwidth of S-Band in MHz')
-parser.add_argument('--narray', '--num-array', type=int, default=64, help='Number of total arrays')
-parser.add_argument('--randnum', '--random-number-seed', type=int, default=None, help='Specify random number seed')
-parser.add_argument('--tel', type=str, default="meerkat", help='The name of the telescope')
-parser.add_argument('--refsig', '--reference-sigma', type=float, default=1,
-                    help='The rms of Gaussian noise in micro-second when all telescope are in reference frequency')
-parser.add_argument('--reffreq', '--reference-frequency', type=float, default=1300,
-                    help='The reference frequency in MHz')
-parser.add_argument('--refflux', '--reference-flux', type=float, default=1,
-                    help='The reference flux in micro-Jy at reference frequency')  # Add coefficient
-parser.add_argument('--refgamma', '--reference-gamma', type=float, default=1.6, help='The reference spectral index')
-parser.add_argument('--rn', '--red-noise', action='store_true',
-                    help='Inject red noise if called')
-parser.add_argument('--rnamp', '--red-noise-amplitude', type=float, default=1e-12,
-                    help='The red noise amplitude')
-parser.add_argument('--rngamma', '--red-noise-gamma', type=float, default=3,
-                    help='The red noise spectral slope (gamma, positive)')
-parser.add_argument('--rnc', '--red-noise-component', type=int, default=100,
-                    help='The number of red noise component')
-parser.add_argument('--rntspan', '--red-noise-tspan', type=float, default=None,
-                    help='The time span used for red noise injection')
-parser.add_argument('--dmn', '--dm-noise', action='store_true',
-                    help='Inject DM noise if called')
-parser.add_argument('--dmnamp', '--dm-noise-amplitude', type=float, default=1e-12,
-                    help='The DM noise amplitude')
-parser.add_argument('--dmngamma', '--dm-noise-gamma', type=float, default=3,
-                    help='The DM noise spectral slope (gamma, positive)')
-parser.add_argument('--dmnc', '--dm-noise-component', type=int, default=100,
-                    help='The number of DM noise component')
-parser.add_argument('--gwb', '--gw-background', action='store_true',
-                    help='Inject gravitational wave background if called')
-parser.add_argument('--gwbamp', '--gwb-amplitude', type=float, default=1e-14,
-                    help='The gravitational wave background amplitude')
-parser.add_argument('--gwbgam', '--gwb-gamma', type=float, default=4,
-                    help='The gravitational wave background spectral slope (gamma, positive)')
-parser.add_argument('--nocorr', '--gwb-no-corr', action='store_true', help='Add red noise with no correlation')
-parser.add_argument('--lmax', '--gwb-lmax', type=int, default=0, help='The maximum multipole of GW power decomposition')
-parser.add_argument('--turnover', '--gwb-turnover', action='store_true',
-                    help='Produce spectrum with turnover at frequency f0')
-parser.add_argument('--gwbf0', '--gwb-f0', type=float, default=1e-9,
-                    help='The frequency of spectrum turnover')
-parser.add_argument('--gwbbeta', '--gwb-beta', type=float, default=1,
-                    help='The spectral index of power spectrum for f<<f0')
-parser.add_argument('--gwbpower', '--gwb-power', type=float, default=1,
-                    help='The fudge factor for flatness of spectrum turnover')
-parser.add_argument('--gwbnpts', '--gwb-npts', type=int, default=600,
-                    help='The number of points used in interpolation')
-parser.add_argument('--gwbhowml', '--gwb-howml', type=float, default=10,
-                    help='The lowest frequency is 1/(howml * T)')
-parser.add_argument('--timd', '--tim-dir', type=str, default='tims/',
-                    help='The relative path to the directory for output simulation tim files')
-parser.add_argument('--resd', '--result-dir', type=str, default='results/',
-                    help='The relative path to the directory for results')
-parser.add_argument('--chaind', '--chains-dir', type=str, default='chains/',
-                    help='The relative path to the directory for chains')
-parser.add_argument('--noised', '--noises-dir', type=str, default='noisefiles/',
-                    help='The relative path to the directory for noisefiles')
-parser.add_argument('--testd', '--test-dir', type=str, default=None,
-                    help='The directory for saving all files in a serie test of a specific parameters')
-parser.add_argument('--comtd', '--comment-dir', type=str, default=None,
-                    help='The subdirectory for saving all files in a serie test')
-parser.add_argument('--reald', '--realization-dir', type=str, default=None,
-                    help='The directory for saving all files in one run')
-# /cluster/home/liuyang/Sub-Array
-
 
 class Band:
-    def __init__(self, freq, bw, num_tel, num_sub):
+    def __init__(self, freq, bw, num_tel, num_sub, narray):
         """Initialize the Band class with given central frequency and bandwidth,
         number of arrays observed at this band, and number of sub-bands in this band."""
         self.freq = freq
         self.bandwidth = bw
         self.num_tel = num_tel
-        self.ratio_tel = self.num_tel/args.narray
+        self.ratio_tel = self.num_tel/narray
         self.num_sub = num_sub
         self.subbw = self.bandwidth/self.num_sub
         self.subfreq = np.linspace(self.freq-0.5*(self.bandwidth-self.subbw),
                                    self.freq+0.5*(self.bandwidth-self.subbw), self.num_sub)
         self.rms = None
 
-    def calculate_rms(self, gamma_p=1.6):
+    def calculate_rms(self, reffreq=1300, refsig=1, refgamma=1.6):
         """Calculate the corresponding rms of ToA at given frequency based on reference rms at reference frequency.
         Default spectral index is 1.6."""
-        rms = args.refsig/self.ratio_tel*np.sqrt(self.num_sub) * (self.subfreq/args.reffreq)**gamma_p
+        rms = refsig/self.ratio_tel*np.sqrt(self.num_sub) * (self.subfreq/reffreq)**refgamma
         self.rms = rms
         return self.rms
 
 
-def tempo2_fake_simulate(parfile, obs_cad, no_obs, maxabs_ha, rha, mjd_start, mjd_end, rmssub, telescope,
-                         subfreq, subbw, randnum=None, outdir=None):
-    """Simulate ToA for given pulsar based on its par file. Input:
-    cadence, number of observation each time, regular/random hour angle, the maximum absolute hour angle allowed,
+def psrn_from_parfile(pf):
+    """Get the name of pulsar from the parameter file. 
+    
+    :param pf: the parameter file of pulsar
+
+    :return: psrn: the name of pulsar
+    """
+    psrname = pf.split("/")[-1].split(".", 1)[0]
+    return psrname
+
+
+def check_directory(path, make=True):
+    """Check if directory exists and create if doesn't.
+
+    :param path: the directory to check
+    :param make: create directories if True
+
+    :return: path: the directory made
+    """
+    if make is True and not os.path.exists(path):
+        os.makedirs(path)
+    return path
+
+
+def make_directories(datad, testdir, comtdir, realdir, make=False):
+    """Make necessary folders inside data directory. 
+    
+    :param datad: the directory containing the par files
+    :param testdir: the directory for saving all files in a series test of a specific parameters
+    :param comtdir: the subdirectory for saving all files in a series test
+    :param realdir: the subdirectory for saving all files in one run
+    :param make: create directories if True
+
+    :return: extrad: the name of the directories (testdir/comtdir/realdir)
+    """
+    extrad = ""
+    if testdir is not None:
+        check_directory(datad + extrad + testdir, make)
+        extrad = extrad + testdir + "/"
+    if comtdir is not None:
+        check_directory(datad + extrad + comtdir, make)
+        extrad = extrad + comtdir + "/"
+    if realdir is not None:
+        check_directory(datad + extrad + realdir, make)
+        extrad = extrad + realdir + "/"
+    return extrad
+
+
+def tempo2_fake_simulate(pf, rmssub, subfreq, subbw, **kwargs):
+    """Simulate ToA for given pulsar based on its par file.
+    Input: cadence, number of observation each time, regular/random hour angle, the maximum absolute hour angle allowed,
     simulation start date in MJD, simulation end date in MJD, observation telescope, rms in ToA,
-    observation frequency, bandwidth, and random number seed."""
-    command = ["tempo2", "-gr", "fake", "-f", parfile, "-ndobs", str(obs_cad), "-nobsd", str(no_obs), "-ha",
-               str(maxabs_ha), "-randha", rha, "-start", str(mjd_start), "-end", str(mjd_end), "-rms",
-               str(1e-3 * rmssub), "-tel", telescope, "-freq", str(subfreq), "-bw", str(subbw), "-withpn", "-setref"]
-    if randnum is not None:
-        command.extend(["-idum", str(randnum)])
-    if outdir is not None:
-        command.extend(["-o", str(outdir+".simulate")])
+    observation frequency, bandwidth, and random number seed. 
+
+    :param pf: the parameter file of pulsar for ToA simulation
+    :param rmssub: the root-mean-square of ToA at the specific subband
+    :param subfreq: the central frequency of the specific subband to simulate ToA at
+    :param subbw: the bandwidth of the specific subband to simulate ToA at
+    """
+    extrad = make_directories(kwargs['datadir'], kwargs['testd'], kwargs['comtd'], kwargs['reald'])
+    outdir = f"{kwargs['datadir']}/{extrad}{psrn_from_parfile(pf)}"
+    command = ["tempo2", "-gr", "fake", "-f", pf, "-ndobs", str(kwargs['cad']), "-nobsd", str(kwargs['nobs']),
+               "-ha", str(kwargs['maxha']), "-randha", kwargs['rha'], "-tel", kwargs['tel'], "-withpn", "-setref",
+               "-start", str(kwargs['mjds']), "-end", str(kwargs['mjde']), "-rms", str(1e-3 * rmssub),
+               "-freq", str(subfreq), "-bw", str(subbw), "-o", str(outdir+".simulate")]
+    if kwargs['randnum'] is not None:
+        command.extend(["-idum", str(kwargs['randnum'])])
     subprocess.run(command, check=True)
 
 
-def describe_name(rnamp, rngamma, dmnamp, dmngamma, gwbamp, gwbgam, rn=False, dmn=False, gwb=False):
-    """The name to describe the simulation data based on the signal injected. Format:
-    RN %Amplitude #Gamma + DM %Amplitude #Gamma + GWB %Amplitude #Gamma ."""
-    desc = ""
-    if rn:
-        desc += f"_RN%A{int(np.log10(rnamp))}#G{int(rngamma)}"
-    if dmn:
-        desc += f"_DM%A{int(np.log10(dmnamp))}#G{int(dmngamma)}"
-    if gwb:
-        desc += f"_GWB%A{int(np.log10(gwbamp))}#G{int(gwbgam)}"
-    return desc
+def psr_list(datad=None, pf=None):
+    """Find the list of pulsars parameter files from given directory or file. 
+    
+    :param datad: the directory containing the par files
+    :param pf: the parameter file of pulsar for ToA simulation
+    
+    :return: datad: the directory containing the par files
+    :return: pf: the name of parameter files
+    :return: psrns: the name of pulsars
+    """
+    if datad is not None:
+        pf = sorted(glob.glob(os.path.join(datad, "*.par")))
+    elif len(pf) > 0:
+        datad = pf.rsplit("/", 1)[0] + "/"
+    psrns = [psrn_from_parfile(p) for p in pf]
+    return datad, pf, psrns
 
 
-def save_paras(arg, exd, plist):
-    """Export the directory and parameter values used in this simulation to a txt file for recording."""
-    with open(f"{arg.datadir+exd}paras_info.txt", "w") as paraf:
-        paraf.writelines("Parameter information:\n")
-        paraf.writelines(f"Relative path to the directory containing the par files: {arg.datadir}\n")
-        paraf.writelines(f"{len(plist)} pulsars are used in simulation: \n")
-        paraf.writelines(f"{pf}, " for pf in plist)
-        paraf.writelines("\n")
-        paraf.writelines(f"Directory for output simulation tim files: {arg.timd}\n")
-        paraf.writelines(f"Directory for result par and tim files: {arg.resd}\n")
-        paraf.writelines(f"Directory for MCMC chains: {arg.chaind}\n")
-        paraf.writelines(f"Directory for noise files: {arg.noised}\n")
-        paraf.writelines(f"Directory for test of a specific parameters: {arg.testd}/\n")
-        paraf.writelines(f"Directory for a test series: {arg.comtd}/\n")
-        paraf.writelines(f"Directory for a realization of given value: {arg.reald}/\n")
-        paraf.writelines(f"MJD range: {arg.mjds} - {arg.mjde}\n")
-        paraf.writelines(f"Observation cadence: {arg.cad} days, {arg.nobs} observations each time\n")
-        paraf.writelines(f"Telescope: {arg.tel}, {arg.narray} arrays in total\n")
-        paraf.writelines(f"UHF Band: central frequency - {arg.cfrequhf} MHz, bandwidth - {arg.bwuhf} MHz, "
-                         f"{arg.nuhfb} arrays, {arg.nsbuhf} sub-bands\n")
-        paraf.writelines(f"L Band: central frequency - {arg.cfreql} MHz, bandwidth - {arg.bwl} MHz, "
-                         f"{arg.nlb} arrays, {arg.nsbl} sub-bands\n")
-        paraf.writelines(f"S Band: central frequency - {arg.cfreqs} MHz, bandwidth - {arg.bws} MHz, "
-                         f"{arg.nsb} arrays, {arg.nsbs} sub-bands\n")
-        paraf.writelines(f"Reference: frequency - {arg.reffreq} MHz, sigma - {arg.refsig} μs, "
-                         f"flux - {arg.refflux} μJy, spectral index - {arg.refgamma}\n")
-        paraf.writelines(f"Maximum absolute hour angle allowed: {arg.maxha}, ")
-        paraf.writelines("random hour angle\n" if arg.rha else "regular hour angle\n")
-        paraf.writelines(f"Random number seed: {arg.randnum}\n" if arg.randnum is not None else "")
-        if arg.rn:
-            paraf.writelines(f"Red Noise injection: amplitude - {arg.rnamp}, gamma - {arg.rngamma}, "
-                             f"components - {arg.rnc}, time span - {arg.rntspan}\n")
-        if arg.dmn:
-            paraf.writelines(f"Dispersion Measure Noise injection: amplitude - {arg.dmnamp}, gamma - {arg.dmngamma}, "
-                             f"components - {arg.dmnc}\n")
-        if arg.gwb:
-            paraf.writelines(f"Gravitational Wave Background injection: amplitude - {arg.gwbamp}, "
-                             f"gamma - {arg.gwbgam}, number of points used in interpolation - {arg.gwbnpts}\n")
-            paraf.writelines(f"Maximum multipole of GW power decomposition - {arg.lmax}, "
-                             f"lowest frequency 1/(howml * T) - {arg.gwbhowml}, "
-                             f"Add red noise with no correlation\n" if arg.nocorr else "\n")
-            if arg.turnover:
-                paraf.writelines(f"Produce spectrum with turnover at frequency f0 - {arg.gwbf0} Hz, "
-                                 f"Spectral index of power spectrum for f<<f0 - {arg.gwbbeta}, "
-                                 f"Fudge factor for flatness of spectrum turnover - {arg.gwbpower}\n")
+def describe_name(**kwargs):
+    """The name to describe the simulation data based on the signal injected. 
+    Format: %RN #Amplitude #Gamma #C + %DM #Amplitude #Gamma #C + %GWB #Amplitude #Gamma #Npts . 
+    
+    :return: desc: the name describing the injected noises and signals
+    """
+    desc = '_'
+    if kwargs['rn']:
+        desc += f"%RN#A{int(np.log10(kwargs['rnamp']))}#G{int(kwargs['rngamma'])}#C{int(kwargs['rnc'])}"
+    if kwargs['dmn']:
+        desc += f"%DM#A{int(np.log10(kwargs['dmnamp']))}#G{int(kwargs['dmngamma'])}#C{int(kwargs['dmnc'])}"
+    if kwargs['gwb']:
+        desc += f"%GWB#A{int(np.log10(kwargs['gwbamp']))}#G{int(kwargs['gwbgamma'])}#N{int(kwargs['gwbnpts'])}"
+    return '' if desc == '_' else desc
 
 
-args = parser.parse_args()
-if args.rha:
-    randha = "y"
-else:
-    randha = "n"
-if args.datadir is not None:
-    par_files = sorted(glob.glob(os.path.join(args.datadir, "*.par")))
-else:
-    par_files = args.parfile
-    args.datadir = args.parfile[0].rsplit("/", 1)[0]+"/"
+def save_paras(**kwargs):
+    """Export the directory and parameter values used in this simulation to a txt file for recording. 
+    
+    :return: infotxt: the txt file with all the information for this simulation
+    """
+    datad, pfs, psrns = psr_list(datad=kwargs['datadir'], pf=kwargs['parfile'])
+    extrad = make_directories(datad, kwargs['testd'], kwargs['comtd'], kwargs['reald'], make=False)
+    infotxt = f"{datad}/{extrad}/paras_info.txt"
+    with open(infotxt, "w") as f:
+        f.writelines("Parameter information:\n")
+        f.writelines(f"Relative path to the directory containing the par files: {kwargs['datadir']}\n")
+        f.writelines(f"{len(psrns)} pulsars are used in simulation: \n")
+        f.writelines(f"{pf} " for pf in psrns)
+        f.writelines("\n")
+        f.writelines(f"Directory for output simulation tim files: {kwargs['timd']}\n")
+        f.writelines(f"Directory for result par and tim files: {kwargs['resd']}\n")
+        f.writelines(f"Directory for MCMC chains: {kwargs['chaind']}\n")
+        f.writelines(f"Directory for noise files: {kwargs['noised']}\n")
+        f.writelines(f"Directory for test of a specific parameters: {kwargs['testd']}/\n")
+        f.writelines(f"Directory for a test series: {kwargs['comtd']}/\n")
+        f.writelines(f"Directory for a realization of given value: {kwargs['reald']}/\n")
+        f.writelines(f"MJD range: {kwargs['mjds']} - {kwargs['mjde']}\n")
+        f.writelines(f"Observation cadence: {kwargs['cad']} days, {kwargs['nobs']} observations each time\n")
+        f.writelines(f"Telescope: {kwargs['tel']}, {kwargs['narray']} arrays in total\n")
+        f.writelines(f"UHF Band: central frequency - {kwargs['cfrequhf']} MHz, bandwidth - {kwargs['bwuhf']} MHz, "
+                     f"{kwargs['nuhfb']} arrays, {kwargs['nsbuhf']} sub-bands\n")
+        f.writelines(f"L Band: central frequency - {kwargs['cfreql']} MHz, bandwidth - {kwargs['bwl']} MHz, "
+                     f"{kwargs['nlb']} arrays, {kwargs['nsbl']} sub-bands\n")
+        f.writelines(f"S Band: central frequency - {kwargs['cfreqs']} MHz, bandwidth - {kwargs['bws']} MHz, "
+                     f"{kwargs['nsb']} arrays, {kwargs['nsbs']} sub-bands\n")
+        f.writelines(f"Reference: frequency - {kwargs['reffreq']} MHz, sigma - {kwargs['refsig']} μs, "
+                     f"flux - {kwargs['refflux']} μJy, spectral index - {kwargs['refgamma']}\n")
+        f.writelines(f"Maximum absolute hour angle allowed: {kwargs['maxha']}, ")
+        f.writelines("random hour angle\n" if kwargs['rha'] == 'y' else "regular hour angle\n")
+        f.writelines(f"Random number seed: {kwargs['randnum']}\n" if kwargs['randnum'] is not None else "")
+        if kwargs['rn']:
+            f.writelines(f"Red Noise injection: amplitude - {kwargs['rnamp']}, gamma - {kwargs['rngamma']}, "
+                         f"components - {kwargs['rnc']}, time span - {kwargs['rntspan']}\n")
+        if kwargs['dmn']:
+            f.writelines(f"Dispersion Measure Noise injection: amplitude - {kwargs['dmnamp']}, "
+                         f"gamma - {kwargs['dmngamma']}, components - {kwargs['dmnc']}\n")
+        if kwargs['gwb']:
+            f.writelines(f"Gravitational Wave Background injection: amplitude - {kwargs['gwbamp']}, "
+                         f"gamma - {kwargs['gwbgamma']}, No. of points used in interpolation - {kwargs['gwbnpts']}\n")
+            f.writelines(f"Maximum multipole of GW power decomposition - {kwargs['lmax']}, "
+                         f"lowest frequency 1/(howml * T) - {kwargs['gwbhowml']}, "
+                         f"Add red noise with no correlation\n" if kwargs['nocorr'] else "\n")
+            if kwargs['turnover']:
+                f.writelines(f"Produce spectrum with turnover at frequency f0 - {kwargs['gwbf0']} Hz, "
+                             f"Spectral index of power spectrum for f<<f0 - {kwargs['gwbbeta']}, "
+                             f"Fudge factor for flatness of spectrum turnover - {kwargs['gwbpower']}\n")
+    return infotxt
 
-datadir = args.datadir
-psrnlist = [parfile.split("/")[-1].split(".", 1)[0] for parfile in par_files]
 
-extradir = ""
-if args.testd is not None:
-    if not os.path.exists(datadir + extradir + args.testd):
-        os.makedirs(datadir + extradir + args.testd)
-    extradir = extradir + args.testd + "/"
-if args.comtd is not None:
-    if not os.path.exists(datadir + extradir + args.comtd):
-        os.makedirs(datadir + extradir + args.comtd)
-    extradir = extradir + args.comtd + "/"
-if args.reald is not None:
-    if not os.path.exists(datadir + extradir + args.reald):
-        os.makedirs(datadir + extradir + args.reald)
-    extradir = extradir + args.reald + "/"
-if not os.path.exists(datadir + extradir + args.timd):
-    os.makedirs(datadir + extradir + args.timd)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='ToA simulate wrapper.'
+                                                 'Simulated ToAs are generated with tempo2 fake plugin.'
+                                                 'Red noise, DM noise, GWB are added with libstempo.'
+                                                 'Written by Yang Liu (liuyang@shao.ac.cn).')
+    parser.add_argument('-p', '--parfile', type=str, default=[], nargs='+',
+                        help='Parameter files for pulsars used in simulation')
+    parser.add_argument('-d', '--datadir', type=str, default=None,
+                        help='Path to the directory containing the par files')
+    parser.add_argument('--cad', '--observation-cadence', type=float, default=14,
+                        help='The number of days between observations')
+    parser.add_argument('--nobs', '--no-of-observation', type=int, default=1,
+                        help='The number of observations on a given day')
+    parser.add_argument('--maxha', '--hour-angle', type=float, default=8,
+                        help='The maximum absolute hour angle allowed')
+    parser.add_argument('--rha', '--random-hour-angle', action='store_true',
+                        help='Use random hour angle coverage if called, otherwise use regular hour angle')
+    parser.add_argument('--mjds', '--initial-mjd', type=int, default=50000,
+                        help='The initial MJD for the simulated TOAs')
+    parser.add_argument('--mjde', '--final-mjd', type=int, default=60000, help='The final MJD for the simulated TOAs')
+    parser.add_argument('--nuhfb', '--num-uhfband', type=int, default=0, help='Number of arrays in UHF-Band')
+    parser.add_argument('--nlb', '--num-lband', type=int, default=32, help='Number of arrays in L-Band')
+    parser.add_argument('--nsb', '--num-sband', type=int, default=32, help='Number of arrays in S-Band')
+    parser.add_argument('--nsbuhf', '--num-uhf-subband', type=int, default=8, help='Number of sub-bands in UHF-Band')
+    parser.add_argument('--nsbl', '--num-l-subband', type=int, default=8, help='Number of sub-bands in L-Band')
+    parser.add_argument('--nsbs', '--num-s-subband', type=int, default=8, help='Number of sub-bands in S-Band')
+    parser.add_argument('--cfrequhf', '--central-frequency-uhf', type=float, default=810,
+                        help='Central frequency of UHF-Band in MHz')
+    parser.add_argument('--cfreql', '--central-frequency-l', type=float, default=1280,
+                        help='Central frequency of L-Band in MHz')
+    parser.add_argument('--cfreqs', '--central-frequency-s', type=float, default=2600,
+                        help='Central frequency of S-Band in MHz')
+    parser.add_argument('--bwuhf', '--bandwidth-uhf', type=float, default=500, help='Bandwidth of UHF-Band in MHz')
+    parser.add_argument('--bwl', '--bandwidth-l', type=float, default=800, help='Bandwidth of L-Band in MHz')
+    parser.add_argument('--bws', '--bandwidth-s', type=float, default=800, help='Bandwidth of S-Band in MHz')
+    parser.add_argument('--narray', '--num-array', type=int, default=64, help='Number of total arrays')
+    parser.add_argument('--randnum', '--random-number-seed', type=int, default=None, help='Specify random number seed')
+    parser.add_argument('--tel', type=str, default='meerkat', help='The name of the telescope')
+    parser.add_argument('--refsig', '--reference-sigma', type=float, default=1,
+                        help='The rms of Gaussian noise in micro-second when all telescope are in reference frequency')
+    parser.add_argument('--reffreq', '--reference-frequency', type=float, default=1300,
+                        help='The reference frequency in MHz')
+    parser.add_argument('--refflux', '--reference-flux', type=float, default=1,
+                        help='The reference flux in micro-Jy at reference frequency')  # Add coefficient
+    parser.add_argument('--refgamma', '--reference-gamma', type=float, default=1.6, help='The reference spectral index')
+    parser.add_argument('--rn', '--red-noise', action='store_true',
+                        help='Inject red noise if called')
+    parser.add_argument('--rnamp', '--red-noise-amplitude', type=float, default=1e-12,
+                        help='The red noise amplitude')
+    parser.add_argument('--rngamma', '--red-noise-gamma', type=float, default=3,
+                        help='The red noise spectral slope (gamma, positive)')
+    parser.add_argument('--rnc', '--red-noise-component', type=int, default=100,
+                        help='The number of red noise component')
+    parser.add_argument('--rntspan', '--red-noise-tspan', type=float, default=None,
+                        help='The time span used for red noise injection')
+    parser.add_argument('--dmn', '--dm-noise', action='store_true',
+                        help='Inject DM noise if called')
+    parser.add_argument('--dmnamp', '--dm-noise-amplitude', type=float, default=1e-12,
+                        help='The DM noise amplitude')
+    parser.add_argument('--dmngamma', '--dm-noise-gamma', type=float, default=3,
+                        help='The DM noise spectral slope (gamma, positive)')
+    parser.add_argument('--dmnc', '--dm-noise-component', type=int, default=100,
+                        help='The number of DM noise component')
+    parser.add_argument('--gwb', '--gw-background', action='store_true',
+                        help='Inject gravitational wave background if called')
+    parser.add_argument('--gwbamp', '--gwb-amplitude', type=float, default=1e-14,
+                        help='The gravitational wave background amplitude')
+    parser.add_argument('--gwbgamma', '--gwb-gamma', type=float, default=4,
+                        help='The gravitational wave background spectral slope (gamma, positive)')
+    parser.add_argument('--nocorr', '--gwb-no-corr', action='store_true', help='Add red noise with no correlation')
+    parser.add_argument('--lmax', '--gwb-lmax', type=int, default=0,
+                        help='The maximum multipole of GW power decomposition')
+    parser.add_argument('--turnover', '--gwb-turnover', action='store_true',
+                        help='Produce spectrum with turnover at frequency f0')
+    parser.add_argument('--gwbf0', '--gwb-f0', type=float, default=1e-9,
+                        help='The frequency of spectrum turnover')
+    parser.add_argument('--gwbbeta', '--gwb-beta', type=float, default=1,
+                        help='The spectral index of power spectrum for f<<f0')
+    parser.add_argument('--gwbpower', '--gwb-power', type=float, default=1,
+                        help='The fudge factor for flatness of spectrum turnover')
+    parser.add_argument('--gwbnpts', '--gwb-npts', type=int, default=600,
+                        help='The number of points used in interpolation')
+    parser.add_argument('--gwbhowml', '--gwb-howml', type=float, default=10,
+                        help='The lowest frequency is 1/(howml * T)')
+    parser.add_argument('--timd', '--tim-dir', type=str, default='tims/',
+                        help='The relative path to the directory for output simulation tim files')
+    parser.add_argument('--resd', '--result-dir', type=str, default='results/',
+                        help='The relative path to the directory for results')
+    parser.add_argument('--chaind', '--chains-dir', type=str, default='chains/',
+                        help='The relative path to the directory for chains')
+    parser.add_argument('--noised', '--noises-dir', type=str, default='noisefiles/',
+                        help='The relative path to the directory for noisefiles')
+    parser.add_argument('--testd', '--test-dir', type=str, default=None,
+                        help='The directory for saving all files in a series test of a specific parameters')
+    parser.add_argument('--comtd', '--comment-dir', type=str, default=None,
+                        help='The subdirectory for saving all files in a series test')
+    parser.add_argument('--reald', '--realization-dir', type=str, default=None,
+                        help='The subdirectory for saving all files in one run')
+    # /cluster/home/liuyang/Sub-Array
 
-describe = describe_name(args.rnamp, args.rngamma, args.dmnamp, args.dmngamma, args.gwbamp, args.gwbgam,
-                         rn=args.rn, dmn=args.dmn, gwb=args.gwb)
-save_paras(args, extradir, psrnlist)
+    args = parser.parse_args()
+    args_keys = ['parfile', 'datadir', 'testd', 'comtd', 'reald', 'timd', 'resd', 'chaind', 'noised', 'maxha', 'rha',
+                 'randnum', 'cad', 'nobs', 'mjds', 'mjde', 'tel', 'narray', 'reffreq', 'refsig', 'refflux', 'refgamma',
+                 'nuhfb', 'nlb', 'nsb', 'nsbuhf', 'nsbl', 'nsbs', 'cfrequhf', 'cfreql', 'cfreqs', 'bwuhf', 'bwl', 'bws',
+                 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan', 'dmn', 'dmnamp', 'dmngamma', 'dmnc', 'nocorr',
+                 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'turnover', 'gwbf0', 'gwbbeta', 'gwbpower', 'gwbhowml', 'lmax']
+    kw_args = {key: getattr(args, key) for key in args_keys if hasattr(args, key)}
 
-for i, parfile in enumerate(par_files):
-    psrn = parfile.split("/")[-1].split(".", 1)[0]
-    timlines = ["FORMAT 1 \n"]
+    if args.rha:
+        kw_args['rha'] = 'y'
+    else:
+        kw_args['rha'] = 'n'
 
-    if args.nuhfb != 0:
-        UHF_Band = Band(args.cfrequhf, args.bwuhf, args.nuhfb, args.nsbuhf)
-        rms_uhf = UHF_Band.calculate_rms(gamma_p=args.refgamma)
-        for j, rms_sub in enumerate(rms_uhf):
-            tempo2_fake_simulate(parfile, args.cad, args.nobs, args.maxha, randha, args.mjds, args.mjde, rms_sub,
-                                 args.tel, UHF_Band.subfreq[j], UHF_Band.subbw, args.randnum, datadir+extradir+psrn)
-            target = f"{psrnlist[i]}_UHF_{j+1}.tim"
-            os.rename(datadir+extradir+f"{psrnlist[i]}.simulate", datadir+extradir+args.timd+target)
-            timlines.append(f"INCLUDE {target} \n")
+    datadir, par_files, psrnlist = psr_list(datad=kw_args['datadir'], pf=kw_args['parfile'])
+    extradir = make_directories(datadir, kw_args['testd'], kw_args['comtd'], kw_args['reald'], make=True)
+    check_directory(datadir + extradir + kw_args['timd'])
+    describe = describe_name(**kw_args)
+    info = save_paras(**kw_args)
 
-    if args.nlb != 0:
-        L_Band = Band(args.cfreql, args.bwl, args.nlb, args.nsbl)
-        rms_l = L_Band.calculate_rms(gamma_p=args.refgamma)
-        for j, rms_sub in enumerate(rms_l):
-            tempo2_fake_simulate(parfile, args.cad, args.nobs, args.maxha, randha, args.mjds, args.mjde, rms_sub,
-                                 args.tel, L_Band.subfreq[j], L_Band.subbw, args.randnum, datadir+extradir+psrn)
-            target = f"{psrnlist[i]}_L_{j + 1}.tim"
-            os.rename(datadir+extradir+f"{psrnlist[i]}.simulate", datadir+extradir+args.timd+target)
-            timlines.append(f"INCLUDE {target} \n")
+    for parfile, psrn in zip(par_files, psrnlist):
+        timlines = ["FORMAT 1 \n"]
 
-    if args.nsb != 0:
-        S_Band = Band(args.cfreqs, args.bws, args.nsb, args.nsbs)
-        rms_s = S_Band.calculate_rms(gamma_p=args.refgamma)
-        for j, rms_sub in enumerate(rms_s):
-            tempo2_fake_simulate(parfile, args.cad, args.nobs, args.maxha, randha, args.mjds, args.mjde, rms_sub,
-                                 args.tel, S_Band.subfreq[j], S_Band.subbw, args.randnum, datadir+extradir+psrn)
-            target = f"{psrnlist[i]}_S_{j + 1}.tim"
-            os.rename(datadir+extradir+f"{psrnlist[i]}.simulate", datadir+extradir+args.timd+target)
-            timlines.append(f"INCLUDE {target} \n")
+        if kw_args['nuhfb'] != 0:
+            U_Band = Band(kw_args['cfrequhf'], kw_args['bwuhf'], kw_args['nuhfb'], kw_args['nsbuhf'], kw_args['narray'])
+            rms_uhf = U_Band.calculate_rms(kw_args['reffreq'], kw_args['refsig'], kw_args['refgamma'])
+            for j, rms_sub in enumerate(rms_uhf):
+                tempo2_fake_simulate(parfile, rms_sub, U_Band.subfreq[j], U_Band.subbw, **kw_args)
+                target = f"{psrn}_UHF_{j + 1}.tim"
+                os.rename(datadir + extradir + f"{psrn}.simulate", datadir + extradir + kw_args['timd'] + target)
+                timlines.append(f"INCLUDE {target} \n")
 
-    with open(f"{datadir+extradir+args.timd+psrn}.tim", "w") as newf:
-        newf.writelines(timlines)
+        if kw_args['nlb'] != 0:
+            L_Band = Band(kw_args['cfreql'], kw_args['bwl'], kw_args['nlb'], kw_args['nsbl'], kw_args['narray'])
+            rms_l = L_Band.calculate_rms(kw_args['reffreq'], kw_args['refsig'], kw_args['refgamma'])
+            for j, rms_sub in enumerate(rms_l):
+                tempo2_fake_simulate(parfile, rms_sub, L_Band.subfreq[j], L_Band.subbw, **kw_args)
+                target = f"{psrn}_L_{j + 1}.tim"
+                os.rename(datadir + extradir + f"{psrn}.simulate", datadir + extradir + kw_args['timd'] + target)
+                timlines.append(f"INCLUDE {target} \n")
 
-    psr = lt.tempopulsar(parfile=parfile, timfile=f"{datadir+extradir+args.timd+psrn}.tim")
-    ltt.make_ideal(psr)
-    rndescribe = ""
+        if kw_args['nsb'] != 0:
+            S_Band = Band(kw_args['cfreqs'], kw_args['bws'], kw_args['nsb'], kw_args['nsbs'], kw_args['narray'])
+            rms_s = S_Band.calculate_rms(kw_args['reffreq'], kw_args['refsig'], kw_args['refgamma'])
+            for j, rms_sub in enumerate(rms_s):
+                tempo2_fake_simulate(parfile, rms_sub, S_Band.subfreq[j], S_Band.subbw, **kw_args)
+                target = f"{psrn}_S_{j + 1}.tim"
+                os.rename(datadir + extradir + f"{psrn}.simulate", datadir + extradir + kw_args['timd'] + target)
+                timlines.append(f"INCLUDE {target} \n")
 
-    if args.rn:
-        ltt.add_rednoise(psr, args.rnamp, args.rngamma, components=args.rnc, tspan=args.rntspan, seed=args.randnum)
-        rndescribe += "_RN%A{}#G{}".format(int(np.log10(args.rnamp)), int(args.rngamma))
-    if args.dmn:
-        # ltt.add_dm(psr, args.dmnamp, args.dmngamma, components=args.dmnc, seed=args.randnum)
-        ltt.add_dm(psr, args.dmnamp*1400*1400*2.41e-4, args.dmngamma, components=args.dmnc, seed=args.randnum)
-        # Convert the enterprise DM amplitude to the libstempo DM amplitude
-        # ltt.add_dm(psr, args.dmnamp*np.sqrt(12)*np.pi, args.dmngamma, components=args.dmnc, seed=args.randnum)
-        # Convert the run_enterprise DM amplitude to the libstempo DM amplitude
-        rndescribe += "_DM%A{}#G{}".format(int(np.log10(args.dmnamp)), int(args.dmngamma))
+        tp = datadir + extradir + kw_args['timd'] + psrn
+        with open(f"{tp}.tim", "w") as newf:
+            newf.writelines(timlines)
 
-    psr.savetim(f"{datadir+extradir+args.timd+psrn}_injected.tim")
-    lt.purgetim(f"{datadir+extradir+args.timd+psrn}_injected.tim")
-    # Delete all lines with reference
-    lines = filter(lambda l: 'reference' not in l, open(f"{datadir+extradir+args.timd+psrn}_injected.tim").readlines())
-    with open(f"{datadir+extradir+args.timd+psrn}{rndescribe}.tim", 'w') as file:
-        file.writelines(lines)
+        psr = lt.tempopulsar(parfile=parfile, timfile=f"{tp}.tim")
+        ltt.make_ideal(psr)
 
-if not os.path.exists(datadir+extradir+args.resd):
-    os.makedirs(datadir+extradir+args.resd)
+        if kw_args['rn']:
+            ltt.add_rednoise(psr, kw_args['rnamp'], kw_args['rngamma'],
+                             components=kw_args['rnc'], tspan=kw_args['rntspan'], seed=kw_args['randnum'])
+        if kw_args['dmn']:
+            # ltt.add_dm(psr, kw_args['dmnamp'], kw_args['dmngamma'],
+            #            components=kw_args['dmnc'], seed=kw_args['randnum'])
+            ltt.add_dm(psr, kw_args['dmnamp'] * 1400 * 1400 * 2.41e-4, kw_args['dmngamma'],
+                       components=kw_args['dmnc'], seed=kw_args['randnum'])
+            # Convert the enterprise DM amplitude to the libstempo DM amplitude
+            # ltt.add_dm(psr, kw_args['dmnamp'] * np.sqrt(12) * np.pi, kw_args['dmngamma'],
+            #            components=kw_args['dmnc'], seed=kw_args['randnum'])
+            # Convert the run_enterprise DM amplitude to the libstempo DM amplitude
 
-if args.gwb:
-    psrobject = [lt.tempopulsar(parfile=f"{datadir+psrn}.par",
-                                timfile=f"{datadir+extradir+args.timd+psrn}_injected.tim")
-                 for psrn in psrnlist]
-    ltt.createGWB(psrobject, args.gwbamp, args.gwbgam, noCorr=args.nocorr, seed=args.randnum, lmax=args.lmax,
-                  turnover=args.turnover, f0=args.gwbf0, beta=args.gwbbeta, power=args.gwbpower, npts=args.gwbnpts,
-                  howml=args.gwbhowml)
-    gwbdescribe = "_GWB%A{}#G{}".format(int(np.log10(args.gwbamp)), int(args.gwbgam))
-    for k, psr in enumerate(psrobject):
-        psrn = psrnlist[k]
-        if not os.path.exists(datadir+extradir+args.resd+psrn):
-            os.makedirs(datadir+extradir+args.resd+psrn)
-        psr.savetim(f"{datadir+extradir+args.resd+psrn}/{psrn+gwbdescribe}.tim")
-        lt.purgetim(f"{datadir+extradir+args.resd+psrn}/{psrn+gwbdescribe}.tim")
-        lines = filter(lambda l: 'reference' not in l,
-                       open(f"{datadir+extradir+args.resd+psrn}/{psrn+gwbdescribe}.tim").readlines())
-        open(f"{datadir+extradir+args.resd+psrn}/{psrn+gwbdescribe}.tim", 'w').writelines(lines)
-        # Move par and tim files to the right directory and rename them according to enterprise standard
-        shutil.copy(par_files[k], datadir+extradir+args.resd+psrn+f"/{psrn}.par")
-        shutil.copy(datadir+extradir+args.resd+psrn+f"/{psrn+gwbdescribe}.tim",
-                    datadir+extradir+args.resd+psrn+f"/{psrn}_all.tim")
-else:
-    for k, psrn in enumerate(psrnlist):
-        if not os.path.exists(datadir+extradir+args.resd+psrn):
-            os.makedirs(datadir+extradir+args.resd+psrn)
-        # Move par and tim files to the right directory and rename them according to enterprise standard
-        shutil.copy(par_files[k], datadir+extradir+args.resd+psrn+f"/{psrn}.par")
-        lines = filter(lambda l: 'reference' not in l,
-                       open(f"{datadir+extradir+args.timd+psrn}_injected.tim").readlines())
-        with open(f"{datadir+extradir+args.resd+psrn}/{psrn}_all.tim", 'w') as file:
+        descr = describe_name(**kw_args).split("%GWB")[0]
+        rndescribe = '' if descr == '_' else descr
+        psr.savetim(f"{tp}{rndescribe}.tim")
+        lt.purgetim(f"{tp}{rndescribe}.tim")
+        # Delete all lines with reference
+        lines = filter(lambda l: 'reference' not in l, open(f"{tp}{rndescribe}.tim").readlines())
+        with open(f"{tp}_injected.tim", 'w') as file:
             file.writelines(lines)
 
-if not os.path.exists(datadir+extradir+args.chaind):
-    os.makedirs(datadir+extradir+args.chaind)
+    check_directory(datadir + extradir + kw_args['resd'])
 
-if not os.path.exists(datadir+extradir+args.chaind+args.noised):
-    os.makedirs(datadir+extradir+args.chaind+args.noised)
+    if kw_args['gwb']:
+        psrobject = [lt.tempopulsar(parfile=f"{datadir + psrn}.par",
+                                    timfile=f"{datadir + extradir + kw_args['timd'] + psrn}_injected.tim")
+                     for psrn in psrnlist]
+        ltt.createGWB(psrobject, kw_args['gwbamp'], kw_args['gwbgamma'], npts=kw_args['gwbnpts'], lmax=kw_args['lmax'],
+                      noCorr=kw_args['nocorr'], howml=kw_args['gwbhowml'], turnover=kw_args['turnover'],
+                      f0=kw_args['gwbf0'], beta=kw_args['gwbbeta'], power=kw_args['gwbpower'], seed=kw_args['randnum'])
+        gwbdescribe = "_%GWB" + describe_name(**kw_args).split("%GWB")[-1]
+        for k, psr in enumerate(psrobject):
+            psrn = psrnlist[k]
+            rp = datadir + extradir + kw_args['resd'] + psrn
+            check_directory(rp)
+            psr.savetim(f"{rp}/{psrn + gwbdescribe}.tim")
+            lt.purgetim(f"{rp}/{psrn + gwbdescribe}.tim")
+            lines = filter(lambda l: 'reference' not in l, open(f"{rp}/{psrn + gwbdescribe}.tim").readlines())
+            open(f"{rp}/{psrn}_all.tim", 'w').writelines(lines)
+            # Move par and tim files to the right directory and rename them according to enterprise standard
+            shutil.copy(par_files[k], f"{rp}/{psrn}.par")
+            # shutil.copy(f"{rp}/{psrn + gwbdescribe}.tim", f"{rp}/{psrn}_all.tim")
+    else:
+        for parfile, psrn in zip(par_files, psrnlist):
+            rp = datadir + extradir + kw_args['resd'] + psrn
+            check_directory(rp)
+            # Move par and tim files to the right directory and rename them according to enterprise standard
+            shutil.copy(parfile, f"{rp}/{psrn}.par")
+            lines = filter(lambda l: 'reference' not in l,
+                           open(f"{datadir + extradir + kw_args['timd'] + psrn}_injected.tim").readlines())
+            open(f"{rp}/{psrn}_all.tim", 'w').writelines(lines)
 
-for psrn in psrnlist:
-    with open(f"{datadir+extradir+args.chaind+args.noised+psrn}.json", 'w') as file:
-        file.writelines('{ \n')
-        file.writelines(f'    "{psrn}_efac": 1,\n')
-        file.writelines(f'    "{psrn}_log10_tnequad": -10\n')
-        file.writelines('} \n')
+    check_directory(datadir + extradir + kw_args['chaind'])
+    check_directory(datadir + extradir + kw_args['chaind'] + kw_args['noised'])
+
+    for psrn in psrnlist:
+        with open(f"{datadir + extradir + kw_args['chaind'] + kw_args['noised'] + psrn}.json", 'w') as file:
+            file.writelines('{ \n')
+            file.writelines(f'    "{psrn}_efac": 1,\n')
+            file.writelines(f'    "{psrn}_log10_tnequad": -10\n')
+            file.writelines('} \n')
