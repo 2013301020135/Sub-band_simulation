@@ -21,6 +21,12 @@ def comment_posttn(parfile):
                 e = line.split()
                 if "JUMP" in e[0] or "TN" in e[0] or "DM_SERIES" in e[0]:
                     parlines.append("# "+line)
+                elif e[0] == "ECC" and len(e) > 3 and float(e[2]) == 1:
+                    newline = e[0] + "            " + e[1] + "   " + e[3] + "\n"
+                    parlines.append(newline)
+                elif e[0] == "ECC" and len(e) == 3 and float(e[2]) == 1:
+                    newline = e[0] + "            " + e[1] + "\n"
+                    parlines.append(newline)
                 else:
                     parlines.append(line)
         newpar = parfile.split("-posttn")[0]+".par"
