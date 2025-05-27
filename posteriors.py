@@ -32,7 +32,7 @@ def get_posteriors(chain, pars, burn, posterior):
         burn = 1
     params = open(pars, 'r').readlines()
     with open(posterior, "w") as resf:
-        form = "{:20s} {:10s} {:10s} {:10s} {:10s} {:10s} {:10s} {:10s} {:10s}"
+        form = "{:25s} {:10s} {:10s} {:10s} {:10s} {:10s} {:10s} {:10s} {:10s}"
         s = form.format("Parameters", "max-like", "mean", "std", "2.5%", "15.9%", "50%", "84.1%", "97.5%")
         resf.write(s + "\n")
         burned = data[int(len(data)*burn):, :]
@@ -40,12 +40,12 @@ def get_posteriors(chain, pars, burn, posterior):
         imax = np.argmax(burned[:, -4])
         pmax = burned[imax, :-4]
         for p, v, mean, std, l, ll, median, ul, u in zip(params, pmax, means, stds, ll97, ll68, medians, ul68, ul97):
-            form = "{:20s} {:< 10g} {:< 10g} {:< 10g} {:< 10g} {:< 10g} {:< 10g} {:< 10g} {:< 10g}"
-            s = form.format(p, v, mean, std, l, ll, median, ul, u)
+            form = "{:25s} {:< 10g} {:< 10g} {:< 10g} {:< 10g} {:< 10g} {:< 10g} {:< 10g} {:< 10g}"
+            s = form.format(p.strip(), v, mean, std, l, ll, median, ul, u)
             resf.write(s + "\n")
 
 
 chaindir = args.chain.rsplit("/", 1)[0]
-pars = chaindir+"/pars.txt"
-posterior = chaindir+"/posterior.txt"
-get_posteriors(args.chain, pars, args.burn, posterior)
+paras_name = chaindir+"/pars.txt"
+posteriors = chaindir+"/posterior.txt"
+get_posteriors(args.chain, paras_name, args.burn, posteriors)
