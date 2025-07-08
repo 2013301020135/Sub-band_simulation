@@ -7,6 +7,7 @@ import os
 import glob
 import subprocess
 import shutil
+import psutil
 # import inspect
 import numpy as np
 import libstempo as lt
@@ -14,13 +15,13 @@ import libstempo.toasim as ltt
 
 
 class Band:
-    def __init__(self, freq, bw, num_tel, num_sub, narray):
+    def __init__(self, freq, bw, ratio_tel, num_tel, num_sub):
         """Initialize the Band class with given central frequency and bandwidth,
-        number of arrays observed at this band, and number of sub-bands in this band."""
+        ratios of arrays observed at this band, and number of sub-bands in this band."""
         self.freq = freq
         self.bandwidth = bw
+        self.ratio_tel = ratio_tel
         self.num_tel = num_tel
-        self.ratio_tel = self.num_tel/narray
         self.num_sub = num_sub
         self.subbw = self.bandwidth/self.num_sub
         self.subfreq = np.linspace(self.freq-0.5*(self.bandwidth-self.subbw),
@@ -160,15 +161,17 @@ def save_paras(**kwargs):
         f.writelines(f"Directory for test of a specific parameters: {kwargs['testd']}/\n")
         f.writelines(f"Directory for a test series: {kwargs['comtd']}/\n")
         f.writelines(f"Directory for a realization of given value: {kwargs['reald']}/\n")
+        f.writelines(f"No. of realization of given value: {kwargs['rlzno']}\n")
         f.writelines(f"MJD range: {kwargs['mjds']} - {kwargs['mjde']}\n")
         f.writelines(f"Observation cadence: {kwargs['cad']} days, {kwargs['nobs']} observations each time\n")
         f.writelines(f"Telescope: {kwargs['tel']}, {kwargs['narray']} arrays in total\n")
+        f.writelines(f"Strategy: {kwargs['strategy']}\n")
         f.writelines(f"UHF Band: central frequency - {kwargs['cfrequhf']} MHz, bandwidth - {kwargs['bwuhf']} MHz, "
-                     f"{kwargs['nuhfb']} arrays, {kwargs['nsbuhf']} sub-bands\n")
+                     f"Ratio: {kwargs['ruhfb']} - {kwargs['nuhfb']} arrays, {kwargs['nsbuhf']} sub-bands\n")
         f.writelines(f"L Band: central frequency - {kwargs['cfreql']} MHz, bandwidth - {kwargs['bwl']} MHz, "
-                     f"{kwargs['nlb']} arrays, {kwargs['nsbl']} sub-bands\n")
+                     f"Ratio: {kwargs['rlb']} - {kwargs['nlb']} arrays, {kwargs['nsbl']} sub-bands\n")
         f.writelines(f"S Band: central frequency - {kwargs['cfreqs']} MHz, bandwidth - {kwargs['bws']} MHz, "
-                     f"{kwargs['nsb']} arrays, {kwargs['nsbs']} sub-bands\n")
+                     f"Ratio: {kwargs['rsb']} - {kwargs['nsb']} arrays, {kwargs['nsbs']} sub-bands\n")
         f.writelines(f"Reference: frequency - {kwargs['reffreq']} MHz, sigma - {kwargs['refsig']} μs, "
                      f"flux - {kwargs['refflux']} μJy, spectral index - {kwargs['refgamma']}\n")
         f.writelines(f"Maximum absolute hour angle allowed: {kwargs['maxha']}, ")
@@ -193,6 +196,62 @@ def save_paras(**kwargs):
     return infotxt
 
 
+def ratio_number(ratio, number, total):
+    """Set the ratio or number of arrays based on each other and total arrays.
+
+    :param ratio: the ratio of arrays for given band
+    :param number: the number of arrays for given band
+    :param total: the total number of arrays
+
+    :return: ratio: the new ratio of arrays for given band
+    :return number: the new number of arrays for given band
+    """
+    if ratio is not None:
+        number = int(total * ratio)
+    elif number is not None:
+        ratio = number/total
+    return ratio, number
+
+
+def subband_strategy(**kwargs):
+    """Find the corresponding subband settings and strategies."""
+    if kwargs['strategy'] is None:
+        kwargs['ruhfb'], kwargs['nuhfb'] = ratio_number(kwargs['ruhfb'], kwargs['nuhfb'], kwargs['narray'])
+        kwargs['rlb'], kwargs['nlb'] = ratio_number(kwargs['rlb'], kwargs['nlb'], kwargs['narray'])
+        kwargs['rsb'], kwargs['nsb'] = ratio_number(kwargs['rsb'], kwargs['nsb'], kwargs['narray'])
+        strategy = ""
+        if kwargs['nuhfb'] > 0 and kwargs['nsbuhf'] > 0:
+            strategy += f"+{kwargs['nuhfb']}UHF{kwargs['nsbuhf']}"
+        if kwargs['nlb'] > 0 and kwargs['nsbl'] > 0:
+            strategy += f"+{kwargs['nlb']}L{kwargs['nsbl']}"
+        if kwargs['nsb'] > 0 and kwargs['nsbs'] > 0:
+            strategy += f"+{kwargs['nsb']}S{kwargs['nsbs']}"
+        kwargs['strategy'] = strategy.split("+", 1)[-1]
+    else:
+        for bandset in kwargs['strategy'].split("+"):
+            if "UHF" in bandset:
+                kwargs['nuhfb'], kwargs['nsbuhf'] = int(bandset.split("UHF")[0]), int(bandset.split("UHF")[1])
+            elif "L" in bandset:
+                kwargs['nlb'], kwargs['nsbl'] = int(bandset.split("L")[0]), int(bandset.split("L")[1])
+            elif "S" in bandset:
+                kwargs['nsb'], kwargs['nsbs'] = int(bandset.split("S")[0]), int(bandset.split("S")[1])
+        kwargs['ruhfb'] = ratio_number(None, kwargs['nuhfb'], kwargs['narray'])[0]
+        kwargs['rlb'] = ratio_number(None, kwargs['nlb'], kwargs['narray'])[0]
+        kwargs['rsb'] = ratio_number(None, kwargs['nsb'], kwargs['narray'])[0]
+    return kwargs
+
+
+def log_memory(stage):
+    """Print the memory usage at certain stage.
+
+    :param stage: the stage in the program
+    """
+    process = psutil.Process(os.getpid())
+    mem = process.memory_info()
+    with open("memory_log.txt", "a") as f:
+        f.write(f"Stage: {stage}\n RSS: {mem.rss/1024**2:.2f} MB\n VMS: {mem.vms/1024**2:.2f} MB\n")
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='ToA simulate wrapper.'
                                                  'Simulated ToAs are generated with tempo2 fake plugin.'
@@ -213,9 +272,12 @@ if __name__ == '__main__':
     parser.add_argument('--mjds', '--initial-mjd', type=int, default=50000,
                         help='The initial MJD for the simulated TOAs')
     parser.add_argument('--mjde', '--final-mjd', type=int, default=60000, help='The final MJD for the simulated TOAs')
-    parser.add_argument('--nuhfb', '--num-uhfband', type=int, default=0, help='Number of arrays in UHF-Band')
-    parser.add_argument('--nlb', '--num-lband', type=int, default=32, help='Number of arrays in L-Band')
-    parser.add_argument('--nsb', '--num-sband', type=int, default=32, help='Number of arrays in S-Band')
+    parser.add_argument('--ruhfb', '--ratio-uhfband', type=float, default=None, help='Ratio of arrays in UHF-Band')
+    parser.add_argument('--rlb', '--ratio-lband', type=float, default=None, help='Ratio of arrays in L-Band')
+    parser.add_argument('--rsb', '--ratio-sband', type=float, default=None, help='Ratio of arrays in S-Band')
+    parser.add_argument('--nuhfb', '--num-uhfband', type=int, default=16, help='Number of arrays in UHF-Band')
+    parser.add_argument('--nlb', '--num-lband', type=int, default=16, help='Number of arrays in L-Band')
+    parser.add_argument('--nsb', '--num-sband', type=int, default=16, help='Number of arrays in S-Band')
     parser.add_argument('--nsbuhf', '--num-uhf-subband', type=int, default=8, help='Number of sub-bands in UHF-Band')
     parser.add_argument('--nsbl', '--num-l-subband', type=int, default=8, help='Number of sub-bands in L-Band')
     parser.add_argument('--nsbs', '--num-s-subband', type=int, default=8, help='Number of sub-bands in S-Band')
@@ -291,20 +353,27 @@ if __name__ == '__main__':
                         help='The subdirectory for saving all files in a series test')
     parser.add_argument('--reald', '--realization-dir', type=str, default=None,
                         help='The subdirectory for saving all files in one run')
+    parser.add_argument('--rlzno', '--realization-number', type=int, default=None,
+                        help='The No. of realization for a given setting')
+    parser.add_argument('--strategy', '--observing-strategy', type=str, default=None, help='The subband strategy used')
     # /cluster/home/liuyang/Sub-Array
 
     args = parser.parse_args()
     args_keys = ['parfile', 'datadir', 'testd', 'comtd', 'reald', 'timd', 'resd', 'chaind', 'noised', 'maxha', 'rha',
                  'randnum', 'cad', 'nobs', 'mjds', 'mjde', 'tel', 'narray', 'reffreq', 'refsig', 'refflux', 'refgamma',
-                 'nuhfb', 'nlb', 'nsb', 'nsbuhf', 'nsbl', 'nsbs', 'cfrequhf', 'cfreql', 'cfreqs', 'bwuhf', 'bwl', 'bws',
-                 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan', 'dmn', 'dmnamp', 'dmngamma', 'dmnc', 'nocorr',
-                 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'turnover', 'gwbf0', 'gwbbeta', 'gwbpower', 'gwbhowml', 'lmax']
+                 'ruhfb', 'rlb', 'rsb', 'nuhfb', 'nlb', 'nsb', 'nsbuhf', 'nsbl', 'nsbs', 'cfrequhf', 'cfreql', 'cfreqs',
+                 'bwuhf', 'bwl', 'bws', 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan', 'dmn', 'dmnamp', 'dmngamma', 'dmnc',
+                 'nocorr', 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'turnover', 'gwbf0', 'gwbbeta', 'gwbpower',
+                 'gwbhowml', 'lmax', 'rlzno', 'strategy']
     kw_args = {key: getattr(args, key) for key in args_keys if hasattr(args, key)}
 
     if args.rha:
         kw_args['rha'] = 'y'
     else:
         kw_args['rha'] = 'n'
+    if (args.reald is None) and (args.rlzno is not None):
+        kw_args['reald'] = str(args.rlzno)
+    kw_args = subband_strategy(**kw_args)
 
     datadir, par_files, psrnlist = psr_list(datad=kw_args['datadir'], pf=kw_args['parfile'])
     extradir = make_directories(datadir, kw_args['testd'], kw_args['comtd'], kw_args['reald'], make=True)
@@ -312,11 +381,12 @@ if __name__ == '__main__':
     describe = describe_name(**kw_args)
     info = save_paras(**kw_args)
 
+    tempopulsar = []
     for parfile, psrn in zip(par_files, psrnlist):
         timlines = ["FORMAT 1 \n"]
 
         if kw_args['nuhfb'] != 0:
-            U_Band = Band(kw_args['cfrequhf'], kw_args['bwuhf'], kw_args['nuhfb'], kw_args['nsbuhf'], kw_args['narray'])
+            U_Band = Band(kw_args['cfrequhf'], kw_args['bwuhf'], kw_args['ruhfb'], kw_args['nuhfb'], kw_args['nsbuhf'])
             rms_uhf = U_Band.calculate_rms(kw_args['reffreq'], kw_args['refsig'], kw_args['refgamma'])
             for j, rms_sub in enumerate(rms_uhf):
                 tempo2_fake_simulate(parfile, rms_sub, U_Band.subfreq[j], U_Band.subbw, **kw_args)
@@ -325,7 +395,7 @@ if __name__ == '__main__':
                 timlines.append(f"INCLUDE {target} \n")
 
         if kw_args['nlb'] != 0:
-            L_Band = Band(kw_args['cfreql'], kw_args['bwl'], kw_args['nlb'], kw_args['nsbl'], kw_args['narray'])
+            L_Band = Band(kw_args['cfreql'], kw_args['bwl'], kw_args['rlb'], kw_args['nlb'], kw_args['nsbl'])
             rms_l = L_Band.calculate_rms(kw_args['reffreq'], kw_args['refsig'], kw_args['refgamma'])
             for j, rms_sub in enumerate(rms_l):
                 tempo2_fake_simulate(parfile, rms_sub, L_Band.subfreq[j], L_Band.subbw, **kw_args)
@@ -334,7 +404,7 @@ if __name__ == '__main__':
                 timlines.append(f"INCLUDE {target} \n")
 
         if kw_args['nsb'] != 0:
-            S_Band = Band(kw_args['cfreqs'], kw_args['bws'], kw_args['nsb'], kw_args['nsbs'], kw_args['narray'])
+            S_Band = Band(kw_args['cfreqs'], kw_args['bws'], kw_args['rsb'], kw_args['nsb'], kw_args['nsbs'])
             rms_s = S_Band.calculate_rms(kw_args['reffreq'], kw_args['refsig'], kw_args['refgamma'])
             for j, rms_sub in enumerate(rms_s):
                 tempo2_fake_simulate(parfile, rms_sub, S_Band.subfreq[j], S_Band.subbw, **kw_args)
@@ -348,7 +418,9 @@ if __name__ == '__main__':
 
         psr = lt.tempopulsar(parfile=parfile, timfile=f"{tp}.tim")
         ltt.make_ideal(psr)
+        tempopulsar.append(psr)
 
+    for psrn, psr in zip(psrnlist, tempopulsar):
         if kw_args['rn']:
             ltt.add_rednoise(psr, kw_args['rnamp'], kw_args['rngamma'],
                              components=kw_args['rnc'], tspan=kw_args['rntspan'], seed=kw_args['randnum'])
@@ -362,6 +434,7 @@ if __name__ == '__main__':
             #            components=kw_args['dmnc'], seed=kw_args['randnum'])
             # Convert the run_enterprise DM amplitude to the libstempo DM amplitude
 
+        tp = datadir + extradir + kw_args['timd'] + psrn
         descr = describe_name(**kw_args).split("%GWB")[0]
         rndescribe = '' if descr == '_' else descr
         psr.savetim(f"{tp}{rndescribe}.tim")
