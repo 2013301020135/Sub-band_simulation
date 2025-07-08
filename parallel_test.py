@@ -55,14 +55,19 @@ def build_task_params(**kwargs):
             raise
         # Clone and modify parameter values from input values
         toa_params = copy.deepcopy(kwargs)
+        describe = sT.describe_name(**toa_params)
         toa_params[config['args_field']] = typed_val
+        if config['in_log'] is True:
+            toa_params[config['args_field']] = np.power(10, typed_val)
+        if toa_params['rlzno'] is not None:
+            toa_params['reald'] = str(toa_params['rlzno'])
         toa_params['testd'] = f"{kwargs['testd']}_{kwargs['vary']}"
         # Name the test directory with testd and the varying parameter
-        describe = sT.describe_name(**toa_params)
         toa_params['comtd'] = f"{kwargs['comtd']}{describe}"
         # Name the comment directory with comtd and the injected signals
         toa_params['reald'] = f"realization_{kwargs['vary']}%{typed_val}#{kwargs['reald']}"
         # Name the realization directory with varying parameter and its value, plus the No. of realization
+        sT.make_directories(toa_params['datadir'], toa_params['testd'], toa_params['comtd'], toa_params['reald'], True)
         params_list.append(toa_params)
         logging.info(f"Parameters created: {kwargs['vary']} = {typed_val}")
     return params_list
@@ -104,37 +109,6 @@ def copy_folder(src, dst):
         print(f"Folder copy failed: {str(e)}")
 
 
-def subband_strategy(**kwargs):
-    """Find the corresponding subband settings and strategies."""
-    nums = [kwargs['nuhfb'], kwargs['nlb'], kwargs['nsb']]
-    if kwargs['strategy'] is None:
-        # if all(int(kwargs['narray']*1./3.) <= x <= math.ceil(kwargs['narray']*1./3.) for x in nums):
-        #    kwargs['strategy'] = f"UHF{kwargs['nsbuhf']}+L{kwargs['nsbl']}+S{kwargs['nsbs']}"
-        strategy = ""
-        if kwargs['nuhfb'] > 0 and kwargs['nsbuhf'] > 0:
-            strategy += f"+{kwargs['nuhfb']}UHF{kwargs['nsbuhf']}"
-        if kwargs['nlb'] > 0 and kwargs['nsbl'] > 0:
-            strategy += f"+{kwargs['nlb']}L{kwargs['nsbl']}"
-        if kwargs['nsb'] > 0 and kwargs['nsbs'] > 0:
-            strategy += f"+{kwargs['nsb']}S{kwargs['nsbs']}"
-        if strategy.startswith("+"):
-            kwargs['strategy'] = strategy.split("+", 1)[-1]
-        else:
-            kwargs['strategy'] = strategy
-    else:
-        for bandset in kwargs['strategy'].split("+"):
-            if "UHF" in bandset:
-                kwargs['nuhfb'], kwargs['nsbuhf'] = bandset.split("UHF")
-            elif "L" in bandset:
-                kwargs['nlb'], kwargs['nsbl'] = bandset.split("L")
-            elif "S" in bandset:
-                kwargs['nsb'], kwargs['nsbs'] = bandset.split("S")
-        # kwargs['nuhfb'] = int(kwargs['narray']*1./3.)
-        # kwargs['nlb'] = math.ceil(kwargs['narray']*1./3.)
-        # kwargs['nsb'] = kwargs['narray'] - kwargs['nlb'] - kwargs['nsb']
-    return kwargs['strategy']
-
-
 def load_posteriors(posts):
     """Load the posteriors for Common Red Signals from posteriors.txt.
 
@@ -164,11 +138,11 @@ def extract_results(paras, **kwargs):
     :param paras: the list containing the parameter dictionaries for all realizations
     """
     entry = []
-    source_idx = ['Pulsars list', 'No. of sources', 'Telescope', 'No. of arrays', 'Strategy']
+    source_idx = ['Pulsars list', 'No. of sources', 'Telescope', 'No. of arrays', 'Strategy', 'No. of realization']
     observe_idx = ['MJD start', 'MJD end', 'Cadence', 'No. of observation', 'Max hour angle', 'Random hour angle']
-    band_idx = ['UHF arrays', 'UHF subbands', 'UHF central freq', 'UHF bandwidth',
-                'L arrays', 'L subbands', 'L central freq', 'L bandwidth',
-                'S arrays', 'S subbands', 'S central freq', 'S bandwidth']
+    band_idx = ['UHF ratios', 'UHF arrays', 'UHF subbands', 'UHF central freq', 'UHF bandwidth',
+                'L ratios', 'L arrays', 'L subbands', 'L central freq', 'L bandwidth',
+                'S ratios', 'S arrays', 'S subbands', 'S central freq', 'S bandwidth']
     reference_idx = ['Reference freq', 'Reference sigma', 'Reference flux', 'Reference gamma']
     noise_idx = ['Red Noise', 'RN log10amp', 'RN gam', 'RN coefficient', 'RN timespan',
                  'Dispersion Measure', 'DM log10amp', 'DM gam', 'DM coefficient']
@@ -184,12 +158,14 @@ def extract_results(paras, **kwargs):
            'No. of iter': kwargs['niter'], 'Burn fraction': kwargs['burn']}
     for p in paras:
         s = {}
+        p = sT.subband_strategy(**p)
         datad, pfiles, psrs = sT.psr_list(p['datadir'])
         s['Pulsars list'] = " ".join(str(psrn) for psrn in psrs)
         s['No. of sources'], s['Telescope'], s['No. of arrays'] = len(psrs), p['tel'], p['narray']
-        s['Strategy'] = subband_strategy(**p)
         s['MJD start'], s['MJD end'], s['Cadence'], s['No. of observation'] = p['mjds'], p['mjde'], p['cad'], p['nobs']
         s['Max hour angle'], s['Random hour angle'] = p['maxha'], p['rha']
+        s['Strategy'], s['No. of realization'] = p['strategy'], p['rlzno']
+        s['UHF ratios'], s['L ratios'], s['S ratios'] = p['ruhfb'], p['rlb'], p['rsb']
         s['UHF arrays'], s['L arrays'], s['S arrays'] = p['nuhfb'], p['nlb'], p['nsb']
         s['UHF subbands'], s['UHF central freq'], s['UHF bandwidth'] = p['nsbuhf'], p['cfrequhf'], p['bwuhf']
         s['L subbands'], s['L central freq'], s['L bandwidth'] = p['nsbl'], p['cfreql'], p['bwl']
@@ -244,15 +220,18 @@ def generate_toa(**kwargs):
     command = ["python", kwargs['workd']+"simulate_ToAs.py", "-d", kwargs['datadir'], "--timd", kwargs['timd'],
                "--resd", kwargs['resd'], "--chaind", kwargs['chaind'], "--noised", kwargs['noised'],
                "--testd", kwargs['testd'], "--comtd", kwargs['comtd'], "--reald", kwargs['reald'],
-               "--cad", str(kwargs['cad']), "--nobs", str(kwargs['nobs']), "--maxha", str(kwargs['maxha']),
-               "--mjds", str(kwargs['mjds']), "--mjde", str(kwargs['mjde']), "--narray", str(kwargs['narray']),
-               "--tel", kwargs['tel'], "--reffreq", str(kwargs['reffreq']), "--refsig", str(kwargs['refsig']),
+               "--tel", kwargs['tel'], "--narray", str(kwargs['narray']), "--cad", str(kwargs['cad']),
+               "--nobs", str(kwargs['nobs']), "--mjds", str(kwargs['mjds']), "--mjde", str(kwargs['mjde']),
+               "--maxha", str(kwargs['maxha']), "--reffreq", str(kwargs['reffreq']), "--refsig", str(kwargs['refsig']),
                "--refflux", str(kwargs['refflux']), "--refgamma", str(kwargs['refgamma']),
+               "--ruhfb", str(kwargs['ruhfb']), "--rlb", str(kwargs['rlb']), "--rsb", str(kwargs['rsb']),
                "--nuhfb", str(kwargs['nuhfb']), "--nlb", str(kwargs['nlb']), "--nsb", str(kwargs['nsb']),
                "--nsbuhf", str(kwargs['nsbuhf']), "--nsbl", str(kwargs['nsbl']), "--nsbs", str(kwargs['nsbs']),
                "--cfrequhf", str(kwargs['cfrequhf']), "--cfreql", str(kwargs['cfreql']),
                "--cfreqs", str(kwargs['cfreqs']), "--bwuhf", str(kwargs['bwuhf']),
                "--bwl", str(kwargs['bwl']), "--bws", str(kwargs['bws'])]
+    if kwargs['rlzno'] is not None:
+        command.extend(["--rlzno", str(kwargs['rlzno'])])
     if kwargs['rha'] is True:
         command.extend(["--rha"])
     if kwargs['randnum'] is not None:
@@ -339,22 +318,24 @@ def draw_plots(**kwargs):
     start = time.time()
     extradir = sT.make_directories(kwargs['datadir'], kwargs['testd'], kwargs['comtd'], kwargs['reald'])
     describe = sT.describe_name(**kwargs)
-    comm_co = ["python", kwargs['entd']+"/post_sampling_analysis/plot_corner.py",
+    comm_co = ["python", kwargs['entd']+"/post_sampling_analysis/plot_corner.py", "--burn", str(kwargs['burn']),
                "-d", kwargs['datadir']+extradir+kwargs['chaind']]
     if 'GWB' in describe:
         comm_co.extend(["-o", kwargs['datadir']+extradir+kwargs['chaind']+f"/corner_crs{describe}.pdf",
                         "-p", "crs_log10_A", "crs_gamma"])
     else:
         comm_co.extend(["-o", kwargs['datadir']+extradir+kwargs['chaind']+f"/corner{describe}.pdf"])
-    comm_ch = ["python", kwargs['entd']+"/post_sampling_analysis/plot_chain_hist.py",
-               "-d", kwargs['datadir']+extradir+kwargs['chaind'],
+    comm_ch = ["python", kwargs['entd']+"/post_sampling_analysis/plot_chain_hist.py", "--plot_chains",
+               "--burn", str(kwargs['burn']), "-d", kwargs['datadir']+extradir+kwargs['chaind'],
                "-o", kwargs['datadir']+extradir+kwargs['chaind']+f"/chain{describe}.pdf"]
     comm_po = ["python", kwargs['workd']+"/posteriors.py",
                "-c", kwargs['datadir']+extradir+kwargs['chaind']+"/chain_1.txt", "-b", str(kwargs['burn'])]
     cmd_corner, cmd_chain, cmd_posterior = "", "", ""
-    for cmdi, cmdj, cmdk in zip(comm_co, comm_ch, comm_po):
+    for cmdi in comm_co:
         cmd_corner += str(cmdi) + " "
+    for cmdj in comm_ch:
         cmd_chain += str(cmdj) + " "
+    for cmdk in comm_po:
         cmd_posterior += str(cmdk) + " "
     with open(f"{kwargs['datadir']}{extradir}plot_commands.txt", 'w') as file:
         file.writelines(f'{cmd_corner}\n')
@@ -416,7 +397,6 @@ def execute_pipeline(**kwargs):
         # Step 2: MCMC fit
         logging.info("===Begin MCMC fitting===")
         mcmc_params = toa_params[:len(success_generate)]
-        print("!!!Debug:", mcmc_params)
         logging.info(f"Successfully constructed parameters lists for {len(mcmc_params)} tasks")
         # The original input parameters for MCMC
         mcmc_results = monitored_parallel_execute(mcmc_fit, mcmc_params, "MCMC progress")
@@ -475,9 +455,12 @@ if __name__ == '__main__':
     parser.add_argument('--mjds', '--initial-mjd', type=int, default=50000,
                         help='The initial MJD for the simulated TOAs')
     parser.add_argument('--mjde', '--final-mjd', type=int, default=60000, help='The final MJD for the simulated TOAs')
-    parser.add_argument('--nuhfb', '--num-uhfband', type=int, default=0, help='Number of arrays in UHF-Band')
-    parser.add_argument('--nlb', '--num-lband', type=int, default=32, help='Number of arrays in L-Band')
-    parser.add_argument('--nsb', '--num-sband', type=int, default=32, help='Number of arrays in S-Band')
+    parser.add_argument('--ruhfb', '--ratio-uhfband', type=float, default=None, help='Ratio of arrays in UHF-Band')
+    parser.add_argument('--rlb', '--ratio-lband', type=float, default=None, help='Ratio of arrays in L-Band')
+    parser.add_argument('--rsb', '--ratio-sband', type=float, default=None, help='Ratio of arrays in S-Band')
+    parser.add_argument('--nuhfb', '--num-uhfband', type=int, default=16, help='Number of arrays in UHF-Band')
+    parser.add_argument('--nlb', '--num-lband', type=int, default=16, help='Number of arrays in L-Band')
+    parser.add_argument('--nsb', '--num-sband', type=int, default=16, help='Number of arrays in S-Band')
     parser.add_argument('--nsbuhf', '--num-uhf-subband', type=int, default=8, help='Number of sub-bands in UHF-Band')
     parser.add_argument('--nsbl', '--num-l-subband', type=int, default=8, help='Number of sub-bands in L-Band')
     parser.add_argument('--nsbs', '--num-s-subband', type=int, default=8, help='Number of sub-bands in S-Band')
@@ -553,8 +536,10 @@ if __name__ == '__main__':
                         help='The subdirectory for saving all files in a series test')
     parser.add_argument('--reald', '--realization-dir', type=str, default='',
                         help='The directory for saving all files in one run')
+    parser.add_argument('--rlzno', '--realization-number', type=int, default=None,
+                        help='The No. of realization for a given setting')
     parser.add_argument('--vary', type=str, required=True,
-                        choices=['refsig', 'refgamma', 'rnamp', 'rngamma', 'rnc', 'dmnamp', 'dmngamma', 'dmnc',
+                        choices=['rlzno', 'refsig', 'refgamma', 'rnamp', 'rngamma', 'rnc', 'dmnamp', 'dmngamma', 'dmnc',
                                  'gwbamp', 'gwbgamma', 'gwbnpts'],
                         help='Specify which parameter to vary in this series test')
     parser.add_argument('--values', '--vary-values', type=float, nargs='+', required=True,
@@ -569,8 +554,8 @@ if __name__ == '__main__':
     parser.add_argument('--maxobs', '--max-observation', type=int, default=100000,
                         help='The maximum number of observation allowed in MCMC fitting')
     parser.add_argument('--samp', '--sampler', type=str, default='ptmcmc',
-                        help='The sampler to use in MCMC fit, options are: ptmcmc, dynesty, mc3, nessai')
-    parser.add_argument('--niter', '--num-iteration', type=int, default=10000,
+                        choices=['ptmcmc', 'dynesty', 'mc3', 'nessai'], help='The sampler to use in MCMC fit')
+    parser.add_argument('--niter', '--num-iteration', type=int, default=100000,
                         help='The number of iteration in MCMC fitting')
     parser.add_argument('--rnnb', '--red-noise-num-bin', type=int, default=100,
                         help='The number of bins used to fit red noise')
@@ -578,7 +563,7 @@ if __name__ == '__main__':
                         help='The number of bins used to fit DM noise')
     parser.add_argument('--gwbnb', '--gwb-num-bin', type=int, default=100,
                         help='The number of bins used to fit gravitational wave background')
-    parser.add_argument('-b', '--burn', type=float, default=0.5, help='Fraction of chains to be burned')
+    parser.add_argument('-b', '--burn', type=float, default=0.3, help='Fraction of chains to be burned')
     parser.add_argument('--refit', '--rerun-fitting', type=str, default=None,
                         help='Rerun MCMC with existing simulation data in given test folder + old comment name')
     parser.add_argument('--strategy', '--observing-strategy', type=str, default=None, help='The subband strategy used')
@@ -587,26 +572,30 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args_keys = ['parfile', 'datadir', 'timd', 'resd', 'chaind', 'noised', 'testd', 'comtd', 'reald', 'maxha', 'rha',
                  'randnum', 'cad', 'nobs', 'mjds', 'mjde', 'tel', 'narray', 'reffreq', 'refsig', 'refflux', 'refgamma',
-                 'nuhfb', 'nlb', 'nsb', 'nsbuhf', 'nsbl', 'nsbs', 'cfrequhf', 'cfreql', 'cfreqs', 'bwuhf', 'bwl', 'bws',
-                 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan', 'rnnb', 'dmn', 'dmnamp', 'dmngamma', 'dmnc', 'dmnnb',
-                 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'gwbnb', 'lmax', 'turnover', 'gwbf0', 'gwbbeta', 'gwbpower',
-                 'gwbhowml', 'nocorr', 'vary', 'values', 'workd', 'entd', 'ncore', 'maxobs', 'samp', 'niter', 'burn', 
-                 'refit', 'strategy', 'sumnam']
+                 'ruhfb', 'rlb', 'rsb', 'nuhfb', 'nlb', 'nsb', 'nsbuhf', 'nsbl', 'nsbs', 'cfrequhf', 'cfreql', 'cfreqs',
+                 'bwuhf', 'bwl', 'bws', 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan', 'rnnb', 'dmn', 'dmnamp', 'dmngamma',
+                 'dmnc', 'dmnnb', 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'gwbnb', 'lmax', 'turnover', 'gwbf0',
+                 'gwbbeta', 'gwbpower', 'gwbhowml', 'nocorr', 'vary', 'values', 'workd', 'entd', 'ncore', 'maxobs',
+                 'samp', 'niter', 'burn', 'refit', 'rlzno', 'strategy', 'sumnam']
     kw_args = {key: getattr(args, key) for key in args_keys if hasattr(args, key)}
     datadir, par_files, psrnlist = sT.psr_list(datad=kw_args['datadir'], pf=kw_args['parfile'])
     kw_args['datadir'], kw_args['parfiles'], kw_args['psrnlist'] = datadir, par_files, psrnlist
+    if args.rlzno is not None:
+        kw_args['reald'] = str(args.rlzno)
     if not args.rn:
         kw_args['rnnb'] = None
     if not args.dmn:
         kw_args['dmnnb'] = None
     if not args.gwb:
         kw_args['gwbnb'] = None
+    kw_args = sT.subband_strategy(**kw_args)
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s',
                         handlers=[logging.FileHandler(f"{kw_args['datadir']}pipeline_{kw_args['vary']}_"
                                                       f"{kw_args['reald']}.log", mode='a'), logging.StreamHandler()])
 
     VARY_PARAM_MAP = {
+        'rlzno': {'args_field': 'rlzno', 'type': int, 'in_log': False, 'valid_range': (1, 10)},
         'refsig': {'args_field': 'refsig', 'type': float, 'in_log': False, 'valid_range': (1e-4, 10)},
         'refgamma': {'args_field': 'refgamma', 'type': float, 'in_log': False, 'valid_range': (-5., 5.)},
         'rnamp': {'args_field': 'rnamp', 'type': float, 'in_log': True, 'valid_range': (-18, -10)},
