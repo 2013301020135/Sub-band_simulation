@@ -177,6 +177,10 @@ def save_paras(**kwargs):
         f.writelines(f"Maximum absolute hour angle allowed: {kwargs['maxha']}, ")
         f.writelines("random hour angle\n" if kwargs['rha'] == 'y' else "regular hour angle\n")
         f.writelines(f"Random number seed: {kwargs['randnum']}\n" if kwargs['randnum'] is not None else "")
+        if kwargs['wfp']:
+            f.writelines("Export WN from par file to noisefile \n")
+        if kwargs['nfp']:
+            f.writelines("Inject noise from par file: \n")
         if kwargs['rn']:
             f.writelines(f"Red Noise injection: amplitude - {kwargs['rnamp']}, gamma - {kwargs['rngamma']}, "
                          f"components - {kwargs['rnc']}, time span - {kwargs['rntspan']}\n")
@@ -241,6 +245,96 @@ def subband_strategy(**kwargs):
     return kwargs
 
 
+def noise_from_parfile(par, **kwargs):
+    """Read the red noise and DM noise parameters from parfile.
+
+    :param par: the par file for the pulsar to inject noise
+    """
+    keys = ['rnamp', 'rngamma', 'rnc', 'dmnamp', 'dmngamma', 'dmnc']
+    words = ['TNRedAmp', 'TNRedGam', 'TNRedC', 'TNDMAmp', 'TNDMGam', 'TNDMC']
+    for ks, ws in zip(keys, words):
+        exist_para = False
+        with open(par) as f:
+            for line in f:
+                if ws in line:
+                    e = line.split()
+                    if ks == 'rnamp' or ks == 'dmnamp':
+                        kwargs[ks] = np.power(10, float(e[-1]))
+                    elif ks == 'rnc' or ks == 'dmnc':
+                        kwargs[ks] = int(e[-1])
+                    else:
+                        kwargs[ks] = float(e[-1])
+                    print(f"Found parameter {ws} in par file: {par} = {kwargs[ks]}")
+                    exist_para = True
+                    break
+        f.close()
+        if not exist_para:
+            print(f"Warning: {ws} not found in par file {par}!")
+    return kwargs
+
+
+def inject_noise(psrobj, par, **kwargs):
+    """Inject red noise and DM noise to libstempo psr object based on settings.
+
+    :param psrobj: the libstempo psr object to inject noise
+    :param par: the par file for the pulsar to inject noise
+
+    :return: psrobj: the libstempo psr object with noise injected
+    """
+    if kwargs['nfp']:
+        print(f"\n Inject RN and DM from parameter file {par}")
+        kwargs = noise_from_parfile(par, **kwargs)
+    if kwargs['rn']:
+        print(f"RN injected: amplitude {kwargs['rnamp']}, gamma {kwargs['rngamma']}, components {kwargs['rnc']}")
+        ltt.add_rednoise(psrobj, kwargs['rnamp'], kwargs['rngamma'],
+                         components=kwargs['rnc'], tspan=kwargs['rntspan'], seed=kwargs['randnum'])
+    if kwargs['dmn']:
+        print(f"DM injected: amplitude {kwargs['dmnamp']}, gamma {kwargs['dmngamma']}, components {kwargs['dmnc']}")
+        # ltt.add_dm(psrobj, kwargs['dmnamp'], kwargs['dmngamma'],
+        #            components=kwargs['dmnc'], seed=kwargs['randnum'])
+        ltt.add_dm(psrobj, kwargs['dmnamp'] * 1400 * 1400 * 2.41e-4, kwargs['dmngamma'],
+                   components=kwargs['dmnc'], seed=kwargs['randnum'])
+        # Convert the enterprise DM amplitude to the libstempo DM amplitude
+        # ltt.add_dm(psrobj, kwargs['dmnamp'] * np.sqrt(12) * np.pi, kwargs['dmngamma'],
+        #            components=kwargs['dmnc'], seed=kwargs['randnum'])
+        # Convert the run_enterprise DM amplitude to the libstempo DM amplitude
+    return psrobj
+
+
+def write_noisefile(jsn, par, psrname, frompar=True):
+    """Write the white noise parameters in par file to json noisefile.
+
+    :param jsn: the name of the json file to write
+    :param par: the par file for the pulsar to export noisefile
+    :param psrname: the name of the pulsar
+    :param frompar: export WN parameters from par file if True
+
+    :return: jsn: the name of the json file to save
+    """
+    jslines = []
+    if frompar:
+        print(f"Write noisefile {jsn} for {psrname} from parameter file {par}")
+        with open(par) as f:
+            for line in f:
+                if "TNEF" in line:
+                    e = line.split()
+                    newline = f'    "{psrname}_{e[-2]}_efac": {e[-1]},\n'
+                    jslines.append(newline)
+                elif "TNEQ" in line:
+                    e = line.split()
+                    newline = f'    "{psrname}_{e[-2]}_log10_tnequad": {e[-1]},\n'
+                    jslines.append(newline)
+        jslines[-1] = jslines[-1][:-2] + ' \n'
+    else:
+        jslines.append(f'    "{psrname}_efac": 1,\n')
+        jslines.append(f'    "{psrname}_log10_tnequad": -10\n')
+    with open(jsn, 'w') as nf:
+        nf.writelines('{ \n')
+        nf.writelines(jslines)
+        nf.writelines('} \n')
+    return jsn
+
+
 def log_memory(stage):
     """Print the memory usage at certain stage.
 
@@ -300,6 +394,10 @@ if __name__ == '__main__':
     parser.add_argument('--refflux', '--reference-flux', type=float, default=1,
                         help='The reference flux in micro-Jy at reference frequency')  # Add coefficient
     parser.add_argument('--refgamma', '--reference-gamma', type=float, default=1.6, help='The reference spectral index')
+    parser.add_argument('--wfp', '--white-from-par', action='store_true',
+                        help='Use the white noise parameters in par file for writing json noise files if called')
+    parser.add_argument('--nfp', '--noise-from-par', action='store_true',
+                        help='Use the parameters in par file for injecting red noise and DM noise if called')
     parser.add_argument('--rn', '--red-noise', action='store_true',
                         help='Inject red noise if called')
     parser.add_argument('--rnamp', '--red-noise-amplitude', type=float, default=1e-12,
@@ -362,9 +460,9 @@ if __name__ == '__main__':
     args_keys = ['parfile', 'datadir', 'testd', 'comtd', 'reald', 'timd', 'resd', 'chaind', 'noised', 'maxha', 'rha',
                  'randnum', 'cad', 'nobs', 'mjds', 'mjde', 'tel', 'narray', 'reffreq', 'refsig', 'refflux', 'refgamma',
                  'ruhfb', 'rlb', 'rsb', 'nuhfb', 'nlb', 'nsb', 'nsbuhf', 'nsbl', 'nsbs', 'cfrequhf', 'cfreql', 'cfreqs',
-                 'bwuhf', 'bwl', 'bws', 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan', 'dmn', 'dmnamp', 'dmngamma', 'dmnc',
-                 'nocorr', 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'turnover', 'gwbf0', 'gwbbeta', 'gwbpower',
-                 'gwbhowml', 'lmax', 'rlzno', 'strategy']
+                 'bwuhf', 'bwl', 'bws', 'wfp', 'nfp', 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan',
+                 'dmn', 'dmnamp', 'dmngamma', 'dmnc', 'nocorr', 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'turnover',
+                 'gwbf0', 'gwbbeta', 'gwbpower', 'gwbhowml', 'lmax', 'rlzno', 'strategy']
     kw_args = {key: getattr(args, key) for key in args_keys if hasattr(args, key)}
 
     if args.rha:
@@ -381,7 +479,7 @@ if __name__ == '__main__':
     describe = describe_name(**kw_args)
     info = save_paras(**kw_args)
 
-    tempopulsar = []
+    tppsr = []
     for parfile, psrn in zip(par_files, psrnlist):
         timlines = ["FORMAT 1 \n"]
 
@@ -418,26 +516,15 @@ if __name__ == '__main__':
 
         psr = lt.tempopulsar(parfile=parfile, timfile=f"{tp}.tim")
         ltt.make_ideal(psr)
-        tempopulsar.append(psr)
+        tppsr.append(psr)
 
-    for psrn, psr in zip(psrnlist, tempopulsar):
-        if kw_args['rn']:
-            ltt.add_rednoise(psr, kw_args['rnamp'], kw_args['rngamma'],
-                             components=kw_args['rnc'], tspan=kw_args['rntspan'], seed=kw_args['randnum'])
-        if kw_args['dmn']:
-            # ltt.add_dm(psr, kw_args['dmnamp'], kw_args['dmngamma'],
-            #            components=kw_args['dmnc'], seed=kw_args['randnum'])
-            ltt.add_dm(psr, kw_args['dmnamp'] * 1400 * 1400 * 2.41e-4, kw_args['dmngamma'],
-                       components=kw_args['dmnc'], seed=kw_args['randnum'])
-            # Convert the enterprise DM amplitude to the libstempo DM amplitude
-            # ltt.add_dm(psr, kw_args['dmnamp'] * np.sqrt(12) * np.pi, kw_args['dmngamma'],
-            #            components=kw_args['dmnc'], seed=kw_args['randnum'])
-            # Convert the run_enterprise DM amplitude to the libstempo DM amplitude
+    for parfile, psrn, psr in zip(par_files, psrnlist, tppsr):
+        psrinject = inject_noise(psr, parfile, **kw_args)
 
         tp = datadir + extradir + kw_args['timd'] + psrn
         descr = describe_name(**kw_args).split("%GWB")[0]
         rndescribe = '' if descr == '_' else descr
-        psr.savetim(f"{tp}{rndescribe}.tim")
+        psrinject.savetim(f"{tp}{rndescribe}.tim")
         lt.purgetim(f"{tp}{rndescribe}.tim")
         # Delete all lines with reference
         lines = filter(lambda l: 'reference' not in l, open(f"{tp}{rndescribe}.tim").readlines())
@@ -447,6 +534,7 @@ if __name__ == '__main__':
     check_directory(datadir + extradir + kw_args['resd'])
 
     if kw_args['gwb']:
+        print(f"GWB injected: amplitude {kw_args['gwbamp']}, gamma {kw_args['gwbgamma']}, points {kw_args['gwbnpts']}")
         psrobject = [lt.tempopulsar(parfile=f"{datadir + psrn}.par",
                                     timfile=f"{datadir + extradir + kw_args['timd'] + psrn}_injected.tim")
                      for psrn in psrnlist]
@@ -478,9 +566,6 @@ if __name__ == '__main__':
     check_directory(datadir + extradir + kw_args['chaind'])
     check_directory(datadir + extradir + kw_args['chaind'] + kw_args['noised'])
 
-    for psrn in psrnlist:
-        with open(f"{datadir + extradir + kw_args['chaind'] + kw_args['noised'] + psrn}.json", 'w') as file:
-            file.writelines('{ \n')
-            file.writelines(f'    "{psrn}_efac": 1,\n')
-            file.writelines(f'    "{psrn}_log10_tnequad": -10\n')
-            file.writelines('} \n')
+    for parfile, psrn in zip(par_files, psrnlist):
+        jsname = f"{datadir + extradir + kw_args['chaind'] + kw_args['noised'] + psrn}.json"
+        jsfile = write_noisefile(jsname, parfile, psrn, frompar=kw_args['wfp'])
