@@ -57,7 +57,7 @@ def build_task_params(**kwargs):
         toa_params = copy.deepcopy(kwargs)
         describe = sT.describe_name(**toa_params)
         toa_params[config['args_field']] = typed_val
-        if config['in_log'] is True:
+        if config['in_log']:
             toa_params[config['args_field']] = np.power(10, typed_val)
         if toa_params['rlzno'] is not None:
             toa_params['reald'] = str(toa_params['rlzno'])
@@ -144,7 +144,7 @@ def extract_results(paras, **kwargs):
                 'L ratios', 'L arrays', 'L subbands', 'L central freq', 'L bandwidth',
                 'S ratios', 'S arrays', 'S subbands', 'S central freq', 'S bandwidth']
     reference_idx = ['Reference freq', 'Reference sigma', 'Reference flux', 'Reference gamma']
-    noise_idx = ['Red Noise', 'RN log10amp', 'RN gam', 'RN coefficient', 'RN timespan',
+    noise_idx = ['WN from par', 'RN from par', 'Red Noise', 'RN log10amp', 'RN gam', 'RN coefficient', 'RN timespan',
                  'Dispersion Measure', 'DM log10amp', 'DM gam', 'DM coefficient']
     signal_idx = ['Gravitational Wave Background', 'GWB log10amp', 'GWB gam', 'GWB points num',
                   'GWB no corr', 'GWB lmax', 'GWB turnover freq', 'GWB beta', 'GWB power', 'GWB lowest freq']
@@ -165,6 +165,7 @@ def extract_results(paras, **kwargs):
         s['MJD start'], s['MJD end'], s['Cadence'], s['No. of observation'] = p['mjds'], p['mjde'], p['cad'], p['nobs']
         s['Max hour angle'], s['Random hour angle'] = p['maxha'], p['rha']
         s['Strategy'], s['No. of realization'] = p['strategy'], p['rlzno']
+        s['WN from par'], s['RN from par'] = p['wfp'], p['nfp']
         s['UHF ratios'], s['L ratios'], s['S ratios'] = p['ruhfb'], p['rlb'], p['rsb']
         s['UHF arrays'], s['L arrays'], s['S arrays'] = p['nuhfb'], p['nlb'], p['nsb']
         s['UHF subbands'], s['UHF central freq'], s['UHF bandwidth'] = p['nsbuhf'], p['cfrequhf'], p['bwuhf']
@@ -173,20 +174,20 @@ def extract_results(paras, **kwargs):
         s['Reference freq'], s['Reference sigma'] = p['reffreq'], p['refsig']
         s['Reference flux'], s['Reference gamma'] = p['refflux'], p['refgamma']
         s['Red Noise'], s['Dispersion Measure'], s['Gravitational Wave Background'] = p['rn'], p['dmn'], p['gwb']
-        if p['rn'] is True:
+        if p['nfp'] or (p['rn'] is False):
+            s['RN log10amp'], s['RN gam'], s['RN coefficient'], s['RN timespan'] = None, None, None, None
+        else:
             s['RN log10amp'], s['RN gam'] = np.log10(p['rnamp']), p['rngamma']
             s['RN coefficient'], s['RN timespan'] = p['rnc'], p['rntspan']
-        else:
-            s['RN log10amp'], s['RN gam'], s['RN coefficient'], s['RN timespan'] = None, None, None, None
-        if p['dmn'] is True:
-            s['DM log10amp'], s['DM gam'], s['DM coefficient'] = np.log10(p['dmnamp']), p['dmngamma'], p['dmnc']
-        else:
+        if p['nfp'] or (p['dmn'] is False):
             s['DM log10amp'], s['DM gam'], s['DM coefficient'] = None, None, None
+        else:
+            s['DM log10amp'], s['DM gam'], s['DM coefficient'] = np.log10(p['dmnamp']), p['dmngamma'], p['dmnc']
         s['GWB turnover freq'], s['GWB beta'], s['GWB power'] = None, None, None
-        if p['gwb'] is True:
+        if p['gwb']:
             s['GWB log10amp'], s['GWB gam'], s['GWB points num'] = np.log10(p['gwbamp']), p['gwbgamma'], p['gwbnpts']
             s['GWB no corr'], s['GWB lmax'], s['GWB lowest freq'] = p['nocorr'], p['lmax'], p['gwbhowml']
-            if p['turnover'] is True:
+            if p['turnover']:
                 s['GWB turnover freq'], s['GWB beta'], s['GWB power'] = p['gwbf0'], p['gwbbeta'], p['gwbpower']
         else:
             s['GWB log10amp'], s['GWB gam'], s['GWB points num'] = None, None, None
@@ -232,25 +233,29 @@ def generate_toa(**kwargs):
                "--bwl", str(kwargs['bwl']), "--bws", str(kwargs['bws'])]
     if kwargs['rlzno'] is not None:
         command.extend(["--rlzno", str(kwargs['rlzno'])])
-    if kwargs['rha'] is True:
+    if kwargs['rha']:
         command.extend(["--rha"])
     if kwargs['randnum'] is not None:
         command.extend(["--randnum", str(kwargs['randnum'])])
-    if kwargs['rn'] is True:
+    if kwargs['wfp']:
+        command.extend(["--wfp"])
+    if kwargs['nfp']:
+        command.extend(["--nfp"])
+    if kwargs['rn']:
         command.extend(["--rn", "--rnamp", str(kwargs['rnamp']), "--rngamma", str(kwargs['rngamma']),
                         "--rnc", str(kwargs['rnc'])])
         if kwargs['rntspan'] is not None:
             command.extend(["--rntspan", str(kwargs['rntspan'])])
-    if kwargs['dmn'] is True:
+    if kwargs['dmn']:
         command.extend(["--dmn", "--dmnamp", str(kwargs['dmnamp']), "--dmngamma", str(kwargs['dmngamma']),
                         "--dmnc", str(kwargs['dmnc'])])
-    if kwargs['gwb'] is True:
+    if kwargs['gwb']:
         command.extend(["--gwb", "--gwbamp", str(kwargs['gwbamp']), "--gwbgamma", str(kwargs['gwbgamma']),
                         "--gwbnpts", str(kwargs['gwbnpts'])])
         command.extend(["--lmax", str(kwargs['lmax']), "--gwbhowml", str(kwargs['gwbhowml'])])
-        if kwargs['nocorr'] is True:
+        if kwargs['nocorr']:
             command.extend(["--nocorr"])
-        if kwargs['turnover'] is True:
+        if kwargs['turnover']:
             command.extend(["--turnover", "--gwbf0", str(kwargs['gwbf0']), "--gwbbeta", str(kwargs['gwbbeta']),
                             "--gwbpower", str(kwargs['gwbpower'])])
     cmd = ""
@@ -483,6 +488,10 @@ if __name__ == '__main__':
     parser.add_argument('--refflux', '--reference-flux', type=float, default=1,
                         help='The reference flux in micro-Jy at reference frequency')  # Add coefficient
     parser.add_argument('--refgamma', '--reference-gamma', type=float, default=1.6, help='The reference spectral index')
+    parser.add_argument('--wfp', '--white-from-par', action='store_true',
+                        help='Use the white noise parameters in par file for writing json noise files if called')
+    parser.add_argument('--nfp', '--noise-from-par', action='store_true',
+                        help='Use the parameters in par file for injecting red noise and DM noise if called')
     parser.add_argument('--rn', '--red-noise', action='store_true',
                         help='Inject red noise if called')
     parser.add_argument('--rnamp', '--red-noise-amplitude', type=float, default=1e-12,
@@ -573,10 +582,10 @@ if __name__ == '__main__':
     args_keys = ['parfile', 'datadir', 'timd', 'resd', 'chaind', 'noised', 'testd', 'comtd', 'reald', 'maxha', 'rha',
                  'randnum', 'cad', 'nobs', 'mjds', 'mjde', 'tel', 'narray', 'reffreq', 'refsig', 'refflux', 'refgamma',
                  'ruhfb', 'rlb', 'rsb', 'nuhfb', 'nlb', 'nsb', 'nsbuhf', 'nsbl', 'nsbs', 'cfrequhf', 'cfreql', 'cfreqs',
-                 'bwuhf', 'bwl', 'bws', 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan', 'rnnb', 'dmn', 'dmnamp', 'dmngamma',
-                 'dmnc', 'dmnnb', 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'gwbnb', 'lmax', 'turnover', 'gwbf0',
-                 'gwbbeta', 'gwbpower', 'gwbhowml', 'nocorr', 'vary', 'values', 'workd', 'entd', 'ncore', 'maxobs',
-                 'samp', 'niter', 'burn', 'refit', 'rlzno', 'strategy', 'sumnam']
+                 'bwuhf', 'bwl', 'bws', 'wfp', 'nfp', 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan', 'rnnb',
+                 'dmn', 'dmnamp', 'dmngamma', 'dmnc', 'dmnnb', 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'gwbnb', 'lmax',
+                 'turnover', 'gwbf0', 'gwbbeta', 'gwbpower', 'gwbhowml', 'nocorr', 'vary', 'values', 'workd', 'entd',
+                 'ncore', 'maxobs', 'samp', 'niter', 'burn', 'refit', 'rlzno', 'strategy', 'sumnam']
     kw_args = {key: getattr(args, key) for key in args_keys if hasattr(args, key)}
     datadir, par_files, psrnlist = sT.psr_list(datad=kw_args['datadir'], pf=kw_args['parfile'])
     kw_args['datadir'], kw_args['parfiles'], kw_args['psrnlist'] = datadir, par_files, psrnlist
