@@ -8,6 +8,7 @@ import glob
 import subprocess
 import shutil
 import psutil
+# import gc
 # import inspect
 import numpy as np
 import libstempo as lt
@@ -15,7 +16,7 @@ import libstempo.toasim as ltt
 
 
 class Band:
-    def __init__(self, freq, bw, ratio_tel, num_tel, num_sub):
+    def __init__(self, freq, bw, ratio_tel, num_tel, num_sub, sigma):
         """Initialize the Band class with given central frequency and bandwidth,
         ratios of arrays observed at this band, and number of sub-bands in this band."""
         self.freq = freq
@@ -26,12 +27,16 @@ class Band:
         self.subbw = self.bandwidth/self.num_sub
         self.subfreq = np.linspace(self.freq-0.5*(self.bandwidth-self.subbw),
                                    self.freq+0.5*(self.bandwidth-self.subbw), self.num_sub)
+        self.sigma = sigma
         self.rms = None
 
     def calculate_rms(self, reffreq=1300, refsig=1, refgamma=1.6):
         """Calculate the corresponding rms of ToA at given frequency based on reference rms at reference frequency.
         Default spectral index is 1.6."""
-        rms = refsig/self.ratio_tel*np.sqrt(self.num_sub) * (self.subfreq/reffreq)**refgamma
+        if refgamma is None:
+            rms = refsig*self.sigma/self.ratio_tel*np.sqrt(self.num_sub) * (self.subfreq/reffreq)**0
+        else:
+            rms = refsig/self.ratio_tel*np.sqrt(self.num_sub) * (self.subfreq/reffreq)**refgamma
         self.rms = rms
         return self.rms
 
@@ -101,8 +106,8 @@ def tempo2_fake_simulate(pf, rmssub, subfreq, subbw, **kwargs):
                "-ha", str(kwargs['maxha']), "-randha", kwargs['rha'], "-tel", kwargs['tel'], "-withpn", "-setref",
                "-start", str(kwargs['mjds']), "-end", str(kwargs['mjde']), "-rms", str(1e-3 * rmssub),
                "-freq", str(subfreq), "-bw", str(subbw), "-o", str(outdir+".simulate")]
-    if kwargs['randnum'] is not None:
-        command.extend(["-idum", str(kwargs['randnum'])])
+    if kwargs['ranidum'] is not None:
+        command.extend(["-idum", str(kwargs['ranidum'])])
     subprocess.run(command, check=True)
 
 
@@ -167,20 +172,26 @@ def save_paras(**kwargs):
         f.writelines(f"Telescope: {kwargs['tel']}, {kwargs['narray']} arrays in total\n")
         f.writelines(f"Strategy: {kwargs['strategy']}\n")
         f.writelines(f"UHF Band: central frequency - {kwargs['cfrequhf']} MHz, bandwidth - {kwargs['bwuhf']} MHz, "
-                     f"Ratio: {kwargs['ruhfb']} - {kwargs['nuhfb']} arrays, {kwargs['nsbuhf']} sub-bands\n")
+                     f"Ratio: {kwargs['ruhfb']} - {kwargs['nuhfb']} arrays, {kwargs['nsbuhf']} sub-bands, "
+                     f"precision: - {kwargs['siguhf']} ns\n")
         f.writelines(f"L Band: central frequency - {kwargs['cfreql']} MHz, bandwidth - {kwargs['bwl']} MHz, "
-                     f"Ratio: {kwargs['rlb']} - {kwargs['nlb']} arrays, {kwargs['nsbl']} sub-bands\n")
+                     f"Ratio: {kwargs['rlb']} - {kwargs['nlb']} arrays, {kwargs['nsbl']} sub-bands, "
+                     f"precision: - {kwargs['sigl']} ns\n")
         f.writelines(f"S Band: central frequency - {kwargs['cfreqs']} MHz, bandwidth - {kwargs['bws']} MHz, "
-                     f"Ratio: {kwargs['rsb']} - {kwargs['nsb']} arrays, {kwargs['nsbs']} sub-bands\n")
+                     f"Ratio: {kwargs['rsb']} - {kwargs['nsb']} arrays, {kwargs['nsbs']} sub-bands, "
+                     f"precision: - {kwargs['sigs']} ns\n")
         f.writelines(f"Reference: frequency - {kwargs['reffreq']} MHz, sigma - {kwargs['refsig']} μs, "
                      f"flux - {kwargs['refflux']} μJy, spectral index - {kwargs['refgamma']}\n")
         f.writelines(f"Maximum absolute hour angle allowed: {kwargs['maxha']}, ")
         f.writelines("random hour angle\n" if kwargs['rha'] == 'y' else "regular hour angle\n")
+        f.writelines(f"Random tempo2 seed: {kwargs['ranidum']}\n" if kwargs['ranidum'] is not None else "")
         f.writelines(f"Random number seed: {kwargs['randnum']}\n" if kwargs['randnum'] is not None else "")
         if kwargs['wfp']:
             f.writelines("Export WN from par file to noisefile \n")
-        if kwargs['nfp']:
-            f.writelines("Inject noise from par file: \n")
+        if kwargs['rfp']:
+            f.writelines(f"Inject RN from par file: (Upper limit on amplitude: {kwargs['rul']}) \n")
+        if kwargs['dfp']:
+            f.writelines(f"Inject DM from par file: (Upper limit on amplitude: {kwargs['dul']}) \n")
         if kwargs['rn']:
             f.writelines(f"Red Noise injection: amplitude - {kwargs['rnamp']}, gamma - {kwargs['rngamma']}, "
                          f"components - {kwargs['rnc']}, time span - {kwargs['rntspan']}\n")
@@ -281,15 +292,20 @@ def inject_noise(psrobj, par, **kwargs):
 
     :return: psrobj: the libstempo psr object with noise injected
     """
-    if kwargs['nfp']:
-        print(f"\n Inject RN and DM from parameter file {par}")
+    if kwargs['rfp']:
+        print(f"\n Inject RN from parameter file {par}")
+        kwargs = noise_from_parfile(par, **kwargs)
+    if kwargs['dfp']:
+        print(f"\n Inject DM from parameter file {par}")
         kwargs = noise_from_parfile(par, **kwargs)
     if kwargs['rn']:
-        print(f"RN injected: amplitude {kwargs['rnamp']}, gamma {kwargs['rngamma']}, components {kwargs['rnc']}")
+        print(f"RN injecting: amplitude {kwargs['rnamp']}, gamma {kwargs['rngamma']}, components {kwargs['rnc']}")
         ltt.add_rednoise(psrobj, kwargs['rnamp'], kwargs['rngamma'],
                          components=kwargs['rnc'], tspan=kwargs['rntspan'], seed=kwargs['randnum'])
+        print(f"PSR {psrobj.name}, par: {psrobj.parfile}, tim: {psrobj.timfile}")
+        print(f"RN injected: amplitude {kwargs['rnamp']}, gamma {kwargs['rngamma']}, components {kwargs['rnc']}")
     if kwargs['dmn']:
-        print(f"DM injected: amplitude {kwargs['dmnamp']}, gamma {kwargs['dmngamma']}, components {kwargs['dmnc']}")
+        print(f"DM injecting: amplitude {kwargs['dmnamp']}, gamma {kwargs['dmngamma']}, components {kwargs['dmnc']}")
         # ltt.add_dm(psrobj, kwargs['dmnamp'], kwargs['dmngamma'],
         #            components=kwargs['dmnc'], seed=kwargs['randnum'])
         ltt.add_dm(psrobj, kwargs['dmnamp'] * 1400 * 1400 * 2.41e-4, kwargs['dmngamma'],
@@ -298,6 +314,8 @@ def inject_noise(psrobj, par, **kwargs):
         # ltt.add_dm(psrobj, kwargs['dmnamp'] * np.sqrt(12) * np.pi, kwargs['dmngamma'],
         #            components=kwargs['dmnc'], seed=kwargs['randnum'])
         # Convert the run_enterprise DM amplitude to the libstempo DM amplitude
+        print(f"PSR {psrobj.name}, par: {psrobj.parfile}, tim: {psrobj.timfile}")
+        print(f"DM injected: amplitude {kwargs['dmnamp']}, gamma {kwargs['dmngamma']}, components {kwargs['dmnc']}")
     return psrobj
 
 
@@ -384,7 +402,11 @@ if __name__ == '__main__':
     parser.add_argument('--bwuhf', '--bandwidth-uhf', type=float, default=500, help='Bandwidth of UHF-Band in MHz')
     parser.add_argument('--bwl', '--bandwidth-l', type=float, default=800, help='Bandwidth of L-Band in MHz')
     parser.add_argument('--bws', '--bandwidth-s', type=float, default=800, help='Bandwidth of S-Band in MHz')
+    parser.add_argument('--siguhf', '--sigma-uhf', type=float, default=1, help='The weights of noise in UHF Band')
+    parser.add_argument('--sigl', '--sigma-l', type=float, default=1, help='The weights of noise in L Band')
+    parser.add_argument('--sigs', '--sigma-s', type=float, default=1, help='The weights of noise in S Band')
     parser.add_argument('--narray', '--num-array', type=int, default=64, help='Number of total arrays')
+    parser.add_argument('--ranidum', '--random-tempo2-seed', type=int, default=None, help='Specify random tempo2 seed')
     parser.add_argument('--randnum', '--random-number-seed', type=int, default=None, help='Specify random number seed')
     parser.add_argument('--tel', type=str, default='meerkat', help='The name of the telescope')
     parser.add_argument('--refsig', '--reference-sigma', type=float, default=1,
@@ -393,11 +415,18 @@ if __name__ == '__main__':
                         help='The reference frequency in MHz')
     parser.add_argument('--refflux', '--reference-flux', type=float, default=1,
                         help='The reference flux in micro-Jy at reference frequency')  # Add coefficient
-    parser.add_argument('--refgamma', '--reference-gamma', type=float, default=1.6, help='The reference spectral index')
+    parser.add_argument('--refgamma', '--reference-gamma', type=float, default=None, 
+                        help='The reference spectral index')
     parser.add_argument('--wfp', '--white-from-par', action='store_true',
                         help='Use the white noise parameters in par file for writing json noise files if called')
-    parser.add_argument('--nfp', '--noise-from-par', action='store_true',
-                        help='Use the parameters in par file for injecting red noise and DM noise if called')
+    parser.add_argument('--rfp', '--red-from-par', action='store_true',
+                        help='Use the red noise parameters in par file for injecting RN if called')
+    parser.add_argument('--dfp', '--dispersion-from-par', action='store_true',
+                        help='Use the dispersion measure parameters in par file for injecting DM if called')
+    parser.add_argument('--rul', '--red-upper-limit', action='store_true',
+                        help='Set upper limit on the red noise amplitude when injecting RN if called')
+    parser.add_argument('--dul', '--dispersion-upper-limit', action='store_true',
+                        help='Set upper limit on the dispersion measure amplitude when injecting DM if called')
     parser.add_argument('--rn', '--red-noise', action='store_true',
                         help='Inject red noise if called')
     parser.add_argument('--rnamp', '--red-noise-amplitude', type=float, default=1e-12,
@@ -458,11 +487,12 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     args_keys = ['parfile', 'datadir', 'testd', 'comtd', 'reald', 'timd', 'resd', 'chaind', 'noised', 'maxha', 'rha',
-                 'randnum', 'cad', 'nobs', 'mjds', 'mjde', 'tel', 'narray', 'reffreq', 'refsig', 'refflux', 'refgamma',
+                 'cad', 'nobs', 'mjds', 'mjde', 'tel', 'narray', 'reffreq', 'refsig', 'refflux', 'refgamma',
                  'ruhfb', 'rlb', 'rsb', 'nuhfb', 'nlb', 'nsb', 'nsbuhf', 'nsbl', 'nsbs', 'cfrequhf', 'cfreql', 'cfreqs',
-                 'bwuhf', 'bwl', 'bws', 'wfp', 'nfp', 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan',
-                 'dmn', 'dmnamp', 'dmngamma', 'dmnc', 'nocorr', 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'turnover',
-                 'gwbf0', 'gwbbeta', 'gwbpower', 'gwbhowml', 'lmax', 'rlzno', 'strategy']
+                 'bwuhf', 'bwl', 'bws', 'siguhf', 'sigl', 'sigs', 'wfp', 'rfp', 'dfp', 'rul', 'dul', 
+                 'rn', 'rnamp', 'rngamma', 'rnc', 'rntspan', 'dmn', 'dmnamp', 'dmngamma', 'dmnc', 'nocorr', 
+                 'gwb', 'gwbamp', 'gwbgamma', 'gwbnpts', 'turnover', 'gwbf0', 'gwbbeta', 'gwbpower', 'gwbhowml', 'lmax', 
+                 'ranidum', 'randnum', 'rlzno', 'strategy']
     kw_args = {key: getattr(args, key) for key in args_keys if hasattr(args, key)}
 
     if args.rha:
@@ -484,7 +514,8 @@ if __name__ == '__main__':
         timlines = ["FORMAT 1 \n"]
 
         if kw_args['nuhfb'] != 0:
-            U_Band = Band(kw_args['cfrequhf'], kw_args['bwuhf'], kw_args['ruhfb'], kw_args['nuhfb'], kw_args['nsbuhf'])
+            U_Band = Band(kw_args['cfrequhf'], kw_args['bwuhf'], kw_args['ruhfb'], 
+                          kw_args['nuhfb'], kw_args['nsbuhf'], kw_args['siguhf'])
             rms_uhf = U_Band.calculate_rms(kw_args['reffreq'], kw_args['refsig'], kw_args['refgamma'])
             for j, rms_sub in enumerate(rms_uhf):
                 tempo2_fake_simulate(parfile, rms_sub, U_Band.subfreq[j], U_Band.subbw, **kw_args)
@@ -493,7 +524,8 @@ if __name__ == '__main__':
                 timlines.append(f"INCLUDE {target} \n")
 
         if kw_args['nlb'] != 0:
-            L_Band = Band(kw_args['cfreql'], kw_args['bwl'], kw_args['rlb'], kw_args['nlb'], kw_args['nsbl'])
+            L_Band = Band(kw_args['cfreql'], kw_args['bwl'], kw_args['rlb'], 
+                          kw_args['nlb'], kw_args['nsbl'], kw_args['sigl'])
             rms_l = L_Band.calculate_rms(kw_args['reffreq'], kw_args['refsig'], kw_args['refgamma'])
             for j, rms_sub in enumerate(rms_l):
                 tempo2_fake_simulate(parfile, rms_sub, L_Band.subfreq[j], L_Band.subbw, **kw_args)
@@ -502,7 +534,8 @@ if __name__ == '__main__':
                 timlines.append(f"INCLUDE {target} \n")
 
         if kw_args['nsb'] != 0:
-            S_Band = Band(kw_args['cfreqs'], kw_args['bws'], kw_args['rsb'], kw_args['nsb'], kw_args['nsbs'])
+            S_Band = Band(kw_args['cfreqs'], kw_args['bws'], kw_args['rsb'], 
+                          kw_args['nsb'], kw_args['nsbs'], kw_args['sigs'])
             rms_s = S_Band.calculate_rms(kw_args['reffreq'], kw_args['refsig'], kw_args['refgamma'])
             for j, rms_sub in enumerate(rms_s):
                 tempo2_fake_simulate(parfile, rms_sub, S_Band.subfreq[j], S_Band.subbw, **kw_args)
@@ -526,21 +559,33 @@ if __name__ == '__main__':
         rndescribe = '' if descr == '_' else descr
         psrinject.savetim(f"{tp}{rndescribe}.tim")
         lt.purgetim(f"{tp}{rndescribe}.tim")
+        # del psrinject
         # Delete all lines with reference
         lines = filter(lambda l: 'reference' not in l, open(f"{tp}{rndescribe}.tim").readlines())
         with open(f"{tp}_injected.tim", 'w') as file:
             file.writelines(lines)
+        # gc.collect()
 
     check_directory(datadir + extradir + kw_args['resd'])
 
     if kw_args['gwb']:
-        print(f"GWB injected: amplitude {kw_args['gwbamp']}, gamma {kw_args['gwbgamma']}, points {kw_args['gwbnpts']}")
-        psrobject = [lt.tempopulsar(parfile=f"{datadir + psrn}.par",
-                                    timfile=f"{datadir + extradir + kw_args['timd'] + psrn}_injected.tim")
-                     for psrn in psrnlist]
+        print(f"GWB injecting: amplitude {kw_args['gwbamp']}, gamma {kw_args['gwbgamma']}, points {kw_args['gwbnpts']}")
+        print(psrnlist)
+        print(datadir, extradir, kw_args['timd'])
+        # gc.collect()
+        psrobject = []
+        for psrn in psrnlist:
+            pltp = lt.tempopulsar(parfile=f"{datadir + psrn}.par",
+                                  timfile=f"{datadir + extradir + kw_args['timd'] + psrn}_injected.tim")
+            print(f"PSR {pltp.name}, par: {pltp.parfile}, tim: {pltp.timfile}")
+            psrobject.append(pltp)
+        # psrobject = [lt.tempopulsar(parfile=f"{datadir + psrn}.par",
+        #                             timfile=f"{datadir + extradir + kw_args['timd'] + psrn}_injected.tim")
+        #              for psrn in psrnlist]
         ltt.createGWB(psrobject, kw_args['gwbamp'], kw_args['gwbgamma'], npts=kw_args['gwbnpts'], lmax=kw_args['lmax'],
                       noCorr=kw_args['nocorr'], howml=kw_args['gwbhowml'], turnover=kw_args['turnover'],
                       f0=kw_args['gwbf0'], beta=kw_args['gwbbeta'], power=kw_args['gwbpower'], seed=kw_args['randnum'])
+        print(f"GWB injected: amplitude {kw_args['gwbamp']}, gamma {kw_args['gwbgamma']}, points {kw_args['gwbnpts']}")
         gwbdescribe = "_%GWB" + describe_name(**kw_args).split("%GWB")[-1]
         for k, psr in enumerate(psrobject):
             psrn = psrnlist[k]
