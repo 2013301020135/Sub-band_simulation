@@ -200,8 +200,6 @@ def extract_results(paras, **kwargs):
         sum_slt = {**s, **fit, **load_posteriors(posts)}
         series_slt = pd.Series(sum_slt, index=sum_idx)
         entry.append(series_slt)
-    # fr_name = ['Pulsars list', 'No. of sources']
-    # fr_id = pd.MultiIndex.from_tuples([(self.psrn, i + 1) for i in range(self.max_glitch)], names=fr_name)
     frame_slt = pd.DataFrame(entry)
     fnlrslt = kwargs['sumnam'] + ".csv"
     if os.path.exists(fnlrslt):
